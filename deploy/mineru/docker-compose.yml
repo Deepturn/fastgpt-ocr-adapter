@@ -1,0 +1,91 @@
+name: fastgpt-ocr-mineru
+
+services:
+  mineru-core:
+    image: ${MINERU_CORE_IMAGE:-ghcr.io/deepturn/fastgpt-mineru-core:3.4.4-cu129}
+    build:
+      context: ../..
+      dockerfile: deploy/mineru/Dockerfile
+    restart: unless-stopped
+    environment:
+      HOME: /models/home
+      MINERU_MODEL_SOURCE: local
+      MINERU_TOOLS_CONFIG_JSON: /models/mineru.json
+      MINERU_API_OUTPUT_ROOT: /work/output
+      MINERU_API_ENABLE_FASTAPI_DOCS: "0"
+      MINERU_API_MAX_CONCURRENT_REQUESTS: ${MINERU_API_MAX_CONCURRENT_REQUESTS:-1}
+      MINERU_API_TASK_RETENTION_SECONDS: ${MINERU_API_TASK_RETENTION_SECONDS:-900}
+      MINERU_PROCESSING_WINDOW_SIZE: ${MINERU_PROCESSING_WINDOW_SIZE:-1}
+    volumes:
+      - mineru-models:/models
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+      - /work/output:size=${MINERU_OUTPUT_TMPFS_SIZE:-8g},mode=1777
+    shm_size: ${MINERU_SHM_SIZE:-16gb}
+    cpus: ${MINERU_CORE_CPU_LIMIT:-8}
+    mem_limit: ${MINERU_CORE_MEMORY_LIMIT:-24g}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
+      interval: 15s
+      timeout: 10s
+      start_period: 10m
+      retries: 4
+
+  adapter:
+    image: ${FASTGPT_OCR_ADAPTER_IMAGE:-ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.0}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mineru-core:
+        condition: service_healthy
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      FASTGPT_OCR_PROVIDER: mineru
+      FASTGPT_OCR_API_PROFILE: mineru-api-v3
+      FASTGPT_OCR_PROVIDER_VERSION: 3.4.4
+      MINERU_BASE_URL: http://mineru-core:8000
+    ports:
+      - "${FASTGPT_OCR_BIND:-127.0.0.1}:${FASTGPT_OCR_PORT:-8001}:8001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    cpus: ${FASTGPT_OCR_CPU_LIMIT:-1}
+    mem_limit: ${FASTGPT_OCR_MEMORY_LIMIT:-512m}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+
+volumes:
+  mineru-models:
+    name: ${MINERU_MODELS_VOLUME:-fastgpt-ocr-mineru-models}

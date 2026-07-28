@@ -1,0 +1,71 @@
+name: Release images
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic adapter version, for example 0.1.0
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  ADAPTER_IMAGE: ghcr.io/deepturn/fastgpt-ocr-adapter
+  MINERU_IMAGE: ghcr.io/deepturn/fastgpt-mineru-core
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish adapter
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.ADAPTER_IMAGE }}:${{ steps.version.outputs.value }}
+            ${{ env.ADAPTER_IMAGE }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Build and publish MinerU 3.4.4 core
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/mineru/Dockerfile
+          push: true
+          tags: |
+            ${{ env.MINERU_IMAGE }}:3.4.4-cu129
+            ${{ env.MINERU_IMAGE }}:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Inspect published images
+        run: |
+          docker buildx imagetools inspect "${ADAPTER_IMAGE}:sha-${GITHUB_SHA}"
+          docker buildx imagetools inspect "${MINERU_IMAGE}:sha-${GITHUB_SHA}"
