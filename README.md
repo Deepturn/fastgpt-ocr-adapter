@@ -504,6 +504,11 @@ ghcr.io/deepturn/fastgpt-mineru-core:3.4.4-cu129
 ghcr.io/deepturn/fastgpt-mineru-core:sha-<commit>
 ```
 
+GHCR 包由发布工作流推送。若包仍保持私有，拉取前先执行
+`docker login ghcr.io`；如果希望按上面的默认 Compose 配置匿名拉取，需要在 GitHub
+的 `Packages → fastgpt-ocr-adapter` 和 `Packages → fastgpt-mineru-core` 设置里把可见性
+改为 Public。阿里云 ACR 的私有镜像不受这个设置影响，仍需单独登录 ACR。
+
 ## 许可证
 
 适配器代码使用 Apache-2.0。
