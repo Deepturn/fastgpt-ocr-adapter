@@ -214,6 +214,14 @@ docker compose -f deploy/mineru/docker-compose.yml down
 docker volume rm fastgpt-ocr-mineru-models
 ```
 
+### 给客户的单文件交付
+
+不需要把整个仓库交给客户时，直接提供 [`deploy/customer/docker-compose.yml`](deploy/customer/docker-compose.yml)
+和同目录的 [`.env.example`](deploy/customer/.env.example)。这份文件只拉已经发布的镜像，
+同时启动适配器和 MinerU Core；参数、登录镜像仓库、FastGPT 环境变量和故障处理步骤见
+[`deploy/customer/README.md`](deploy/customer/README.md)。客户复制 `.env.example` 为 `.env`，
+填入 Token 和实际镜像地址后即可执行 `docker compose pull && docker compose up -d`。
+
 ## 连接外部 Marker
 
 本项目不发布 Marker Core 镜像。先按照 Marker 官方 README 安装并启动
