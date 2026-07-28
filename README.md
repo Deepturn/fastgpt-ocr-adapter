@@ -388,6 +388,111 @@ docker compose config
 测试覆盖率门槛为 90%。真实 OCR 验收需要另外准备 MinerU 3.4.4、Marker 1.10.2 或
 Marker 2.0.0 服务。
 
+## 推送到阿里云 ACR 私有仓库
+
+你已经有命名空间 `fastgpt-ocr-adapter`，还需要在这个命名空间下创建镜像仓库。建议
+先建下面这个仓库，适配器镜像就放这里：
+
+```text
+命名空间：fastgpt-ocr-adapter
+仓库名：adapter
+仓库类型：私有
+代码源：本地仓库
+```
+
+如果还要把自带 GPU 的 MinerU Core 一起放到 ACR，再建第二个仓库：
+
+```text
+命名空间：fastgpt-ocr-adapter
+仓库名：mineru-core
+仓库类型：私有
+代码源：本地仓库
+```
+
+在阿里云控制台进入“容器镜像服务 ACR → 实例 → 仓库 → 创建镜像仓库”。仓库地址不要
+自己猜，打开实例的“访问凭证”页面，复制控制台给出的登录服务器地址。个人版可能是
+`registry.cn-<region>.aliyuncs.com` 或 `crpi-xxxx.cn-<region>.personal.cr.aliyuncs.com`，
+企业版通常是 `<instance-name>-registry.cn-<region>.cr.aliyuncs.com`。
+
+官方资料：
+
+- [个人版创建仓库、登录、推送和拉取](https://www.alibabacloud.com/help/en/acr/user-guide/use-a-container-registry-personal-edition-instance-to-push-and-pull-images)
+- [企业版 Docker 基本操作](https://www.alibabacloud.com/help/en/acr/getting-started/basic-operations-on-docker)
+- [配置 Docker/RAM 访问凭证](https://www.alibabacloud.com/help/en/acr/user-guide/configure-access-credentials)
+
+### 在本机手动推送适配器
+
+下面把 `ACR_REGISTRY` 换成控制台给你的登录服务器。例如旧版个人实例可能是
+`registry.cn-hangzhou.aliyuncs.com`，新实例则可能带 `crpi-xxxx` 前缀。推送到 GPU
+服务器时使用 `linux/amd64`，避免在 Apple Silicon 上构建出服务器不能运行的架构。
+
+```bash
+export ACR_REGISTRY=registry.cn-<region>.aliyuncs.com
+export ACR_NAMESPACE=fastgpt-ocr-adapter
+export IMAGE_VERSION=0.1.0
+
+docker login --username=<ACR用户名> "$ACR_REGISTRY"
+docker buildx build \
+  --platform linux/amd64 \
+  -t "$ACR_REGISTRY/$ACR_NAMESPACE/adapter:$IMAGE_VERSION" \
+  -t "$ACR_REGISTRY/$ACR_NAMESPACE/adapter:sha-$(git rev-parse --short=12 HEAD)" \
+  --push .
+```
+
+`docker login` 提示密码时，输入 ACR“访问凭证”页面设置的专用密码，不是阿里云控制台
+登录密码。推送完成后，在 ACR 仓库的“镜像版本”页面确认标签和 digest；再在部署机器
+上登录并拉取验证：
+
+```bash
+docker login --username=<ACR用户名> "$ACR_REGISTRY"
+docker pull "$ACR_REGISTRY/$ACR_NAMESPACE/adapter:$IMAGE_VERSION"
+docker image inspect "$ACR_REGISTRY/$ACR_NAMESPACE/adapter:$IMAGE_VERSION"
+```
+
+### 让 Compose 使用 ACR 镜像
+
+在部署机器的 `.env` 中把镜像地址改成 ACR 地址，其他解析配置照旧：
+
+```dotenv
+FASTGPT_OCR_ADAPTER_IMAGE=registry.cn-<region>.aliyuncs.com/fastgpt-ocr-adapter/adapter:0.1.0
+```
+
+然后执行：
+
+```bash
+docker compose pull adapter
+docker compose up -d adapter
+docker compose ps
+curl -fsS http://127.0.0.1:8001/health/ready
+```
+
+私有仓库不能匿名拉取，所以每台运行适配器的机器都要先执行一次 `docker login`。不要
+把 ACR 密码写进 `.env`、Compose 文件、GitHub 仓库或命令历史；生产环境建议为 ACR
+创建只允许当前仓库 push/pull 的 RAM 用户。
+
+### 用 GitHub Actions 推送到 ACR
+
+仓库已经包含手动工作流 `.github/workflows/publish-aliyun.yml`。在 GitHub 仓库的
+`Settings → Secrets and variables → Actions` 中设置：
+
+```text
+Variables:
+  ALIYUN_ACR_REGISTRY=控制台“访问凭证”显示的登录服务器
+  ALIYUN_ACR_NAMESPACE=fastgpt-ocr-adapter
+
+Secrets:
+  ALIYUN_ACR_USERNAME=ACR 登录用户名
+  ALIYUN_ACR_PASSWORD=ACR 专用密码
+```
+
+然后打开 `Actions → Publish images to Alibaba ACR → Run workflow`，版本填
+`0.1.0`。第一次只发布适配器，确认 ACR 仓库和拉取权限都正常后，再按需勾选
+`publish_mineru_core`。MinerU Core 只构建 `linux/amd64`，需要 NVIDIA GPU 的部署机。
+
+工作流不会自动读取你的阿里云账号密码，也不会在仓库里保存密码；只从 GitHub Actions
+Secret 读取。若 ACR 实例未开启公网访问，GitHub-hosted runner 无法推送，应改为在能
+访问该实例的自托管 runner 或部署机上执行上面的手动命令。
+
 ## 镜像和版本
 
 正式发布只使用语义版本和提交 SHA，不发布 `latest`：

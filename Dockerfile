@@ -7,13 +7,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 adapter \
     && useradd --uid 10001 --gid adapter --no-create-home --shell /usr/sbin/nologin adapter
 
 COPY requirements.lock /tmp/requirements.lock
-RUN python -m pip install --no-cache-dir -r /tmp/requirements.lock
+RUN python -m pip install --no-cache-dir \
+      pip==26.1.2 \
+      setuptools==80.9.0 \
+      wheel==0.46.2 \
+    && python -m pip install --no-cache-dir -r /tmp/requirements.lock
 
 COPY src /app/src
 
