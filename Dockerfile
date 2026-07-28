@@ -16,9 +16,9 @@ RUN apt-get update \
 COPY requirements.lock /tmp/requirements.lock
 RUN python -m pip install --no-cache-dir \
       pip==26.1.2 \
-      setuptools==80.9.0 \
       wheel==0.46.2 \
-    && python -m pip install --no-cache-dir -r /tmp/requirements.lock
+    && python -m pip install --no-cache-dir -r /tmp/requirements.lock \
+    && python -m pip uninstall -y setuptools wheel
 
 COPY src /app/src
 
