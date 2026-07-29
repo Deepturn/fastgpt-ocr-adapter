@@ -1,62 +1,116 @@
 # 客户部署文件
 
-这套 Compose 用来在一台有 NVIDIA GPU 的 Linux 服务器上启动：
+这份 Compose 只启动 FastGPT OCR Adapter，不启动、不内嵌 MinerU 或 Marker。
 
-- `mineru-core`：官方 MinerU 3.4.4 Pipeline 服务，第一次启动会下载模型。
-- `adapter`：给 FastGPT 使用的固定接口，只对外暴露 8001 端口。
+客户先按官方方式部署自己的 OCR 服务，再通过 YAML 中的 `Provider + API Profile + 上游地址`
+选择对应驱动。一个 Adapter 实例只连接一种 OCR 服务；切换后需要重启容器。
 
-适配器不会把 MinerU 的 8000 端口发布到宿主机，两个容器通过 Docker 内网通信。
-
-## 1. 准备文件
-
-只需要这一份 `docker-compose.yml`。先打开文件，修改标有“必填”的两项：
-
-```yaml
-image: registry.example.com/fastgpt-mineru-core:3.4.4-cu129
-FASTGPT_OCR_AUTH_TOKEN: REPLACE_WITH_RANDOM_TOKEN
+```text
+FastGPT -> Adapter:8001 -> 客户自己的 MinerU / Marker
 ```
 
-生成 Token：
+## 1. 下载 YAML
+
+```bash
+curl -fsSLo docker-compose.yml \
+  https://raw.githubusercontent.com/Deepturn/fastgpt-ocr-adapter/main/deploy/customer/docker-compose.yml
+```
+
+不需要 `.env` 文件。
+
+## 2. 修改 Token
+
+生成一个随机 Token：
 
 ```bash
 openssl rand -hex 32
 ```
 
-把输出结果替换 `FASTGPT_OCR_AUTH_TOKEN` 的占位符。这个值之后还要填到 FastGPT 的
-`CUSTOM_PDF_PARSE_KEY`。
+把 YAML 中的占位符替换成生成结果：
 
-## 2. 登录镜像仓库
+```yaml
+FASTGPT_OCR_AUTH_TOKEN: REPLACE_WITH_RANDOM_TOKEN
+```
 
-适配器示例镜像在阿里云 ACR，MinerU Core 默认在 GHCR。按客户实际镜像地址登录：
+这个值还需要配置到 FastGPT 的 `CUSTOM_PDF_PARSE_KEY`。
+
+## 3. 选择 OCR 驱动
+
+### MinerU 3.4.4
+
+```yaml
+FASTGPT_OCR_PROVIDER: mineru
+FASTGPT_OCR_API_PROFILE: mineru-api-v3
+FASTGPT_OCR_PROVIDER_VERSION: "3.4.4"
+MINERU_BASE_URL: http://实际MinerU地址:8000
+```
+
+`MINERU_BASE_URL` 只写服务根地址，不要加 `/file_parse`。
+
+### Marker 1.8-1.10
+
+```yaml
+FASTGPT_OCR_PROVIDER: marker
+FASTGPT_OCR_API_PROFILE: marker-server-v1
+FASTGPT_OCR_PROVIDER_VERSION: "1.10.2"
+MARKER_BASE_URL: http://实际Marker地址:8000
+MARKER_FORCE_OCR: "false"
+```
+
+### Marker 2.0.0
+
+```yaml
+FASTGPT_OCR_PROVIDER: marker
+FASTGPT_OCR_API_PROFILE: marker-server-v2
+FASTGPT_OCR_PROVIDER_VERSION: "2.0.0"
+MARKER_BASE_URL: http://实际Marker地址:8000
+MARKER_FORCE_OCR: "false"
+MARKER_MODE: balanced
+```
+
+Marker 的 `balanced` 更偏向质量，`fast` 更偏向速度。不同 OCR 版本不能只改版本号，
+必须同时选择匹配的 API Profile。
+
+OCR 服务部署在 Adapter 宿主机时，可以使用：
+
+```yaml
+MINERU_BASE_URL: http://host.docker.internal:8000
+```
+
+OCR 服务部署在其他服务器时，改成那台服务器的私网 IP。不要填写 `127.0.0.1`，
+因为容器里的 `127.0.0.1` 指向 Adapter 容器自己。
+
+## 4. 启动
+
+阿里云 ACR 是私有仓库时先登录：
 
 ```bash
 docker login crpi-g79ks4g398u6l56b.cn-hangzhou.personal.cr.aliyuncs.com
-docker login ghcr.io
 ```
 
-如果客户不能访问 GHCR，先把 MinerU Core 镜像复制到客户自己的仓库，然后把 YAML 中的
-`mineru-core.image` 改成新地址。仓库密码只在 `docker login` 时输入，不要写进 YAML。
-
-## 3. 启动和检查
+然后启动：
 
 ```bash
 docker compose config
 docker compose pull
 docker compose up -d
 docker compose ps
-docker compose logs -f mineru-core
+docker compose logs -f adapter
 ```
 
-第一次启动会下载 Pipeline 模型，可能需要较长时间。模型保存在名为
-`fastgpt-ocr-mineru-models` 的 Docker volume 中，重启和升级适配器不会重复下载。
+`docker compose ps` 中显示 `healthy`，说明 Adapter 已连接到所选 OCR 服务且接口结构匹配。
 
-确认适配器就绪：
+## 5. 接入 FastGPT
 
-```bash
-curl -fsS http://127.0.0.1:8001/health/ready
+在 FastGPT 中配置：
+
+```dotenv
+CUSTOM_PDF_PARSE_URL=http://<Adapter服务器私网IP>:8001/v2/parse/file
+CUSTOM_PDF_PARSE_KEY=YAML中的FASTGPT_OCR_AUTH_TOKEN
+customPdfParse=true
 ```
 
-测试接口：
+测试 Adapter：
 
 ```bash
 curl -fS -X POST http://127.0.0.1:8001/v2/parse/file \
@@ -64,87 +118,78 @@ curl -fS -X POST http://127.0.0.1:8001/v2/parse/file \
   -F "file=@sample.pdf"
 ```
 
-## 4. FastGPT 配置
+成功响应格式：
 
-在 FastGPT 的环境变量中填写：
-
-```dotenv
-CUSTOM_PDF_PARSE_URL=http://<适配器服务器私网IP>:8001/v2/parse/file
-CUSTOM_PDF_PARSE_KEY=与 YAML 中 FASTGPT_OCR_AUTH_TOKEN 完全相同
-customPdfParse=true
+```json
+{
+  "success": true,
+  "message": "",
+  "pages": 12,
+  "markdown": "..."
+}
 ```
-
-如果 FastGPT 与适配器在同一台服务器，保持端口映射中的 `127.0.0.1`；如果 FastGPT
-在另一台服务器，把 YAML 端口映射中的第一个 `127.0.0.1` 改为适配器服务器私网 IP，
-并在防火墙中只允许 FastGPT 的 IP 访问 8001。
 
 ## 参数说明
 
 | 参数 | 默认值 | 作用 |
 | --- | --- | --- |
-| `mineru-core.image` | `registry.example.com/...` | 必填。MinerU Core 3.4.4 镜像地址。 |
-| `adapter.image` | ACR `adapter:0.1.0` | 适配器镜像地址和版本。客户使用自己的仓库时替换。 |
-| `FASTGPT_OCR_AUTH_TOKEN` | `REPLACE_WITH_RANDOM_TOKEN` | 必填。Bearer Token，必须与 FastGPT 的 `CUSTOM_PDF_PARSE_KEY` 相同。 |
-| `FASTGPT_OCR_TIMEOUT_SECONDS` | `540` | 单个文件调用上游的最长时间，单位秒。 |
-| `FASTGPT_OCR_MAX_FILE_BYTES` | `52428800` | 上传文件大小上限，单位字节，即 50 MiB。 |
+| `adapter.image` | ACR `adapter:0.1.0` | 中间件镜像地址。它不包含 OCR 模型。 |
+| `FASTGPT_OCR_AUTH_TOKEN` | 占位符 | 必填。必须与 FastGPT 的 `CUSTOM_PDF_PARSE_KEY` 相同。 |
+| `FASTGPT_OCR_PROVIDER` | `mineru` | 驱动名称，目前支持 `mineru`、`marker`。 |
+| `FASTGPT_OCR_API_PROFILE` | `mineru-api-v3` | 具体接口处理逻辑，必须与 OCR 版本匹配。 |
+| `FASTGPT_OCR_PROVIDER_VERSION` | `3.4.4` | 预期 OCR 版本，用于健康检查和版本约束。 |
+| `MINERU_BASE_URL` | 宿主机 8000 | MinerU 服务根地址，仅 MinerU 驱动使用。 |
+| `MARKER_BASE_URL` | 宿主机 8000 | Marker 服务根地址，仅 Marker 驱动使用。 |
+| `MARKER_FORCE_OCR` | `false` | 是否强制 Marker 使用 OCR。 |
+| `MARKER_MODE` | `balanced` | Marker 2.0.0 模式，可选 `balanced`、`fast`。 |
+| `MARKER_AUTH_TOKEN` | 空 | Marker 上游存在 Bearer 鉴权时填写。 |
+| `FASTGPT_OCR_TIMEOUT_SECONDS` | `540` | 调用 OCR 服务的超时时间，必须小于 600 秒。 |
+| `FASTGPT_OCR_MAX_FILE_BYTES` | `52428800` | PDF 大小上限，即 50 MiB。 |
 | `FASTGPT_OCR_MAX_PAGES` | `500` | PDF 页数上限。 |
-| `FASTGPT_OCR_MAX_CONCURRENT_REQUESTS` | `1` | 同时执行的 OCR 请求数；不会增加 GPU 能力。 |
-| `FASTGPT_OCR_MAX_QUEUED_REQUESTS` | `1` | 执行槽满时允许等待的请求数；再多返回 `503 PARSER_BUSY`。 |
-| `FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS` | `60` | 请求在队列中最长等待时间，超时返回 `503 QUEUE_TIMEOUT`。建议 15-30 秒。 |
-| `FASTGPT_OCR_PROVIDER` | `mineru` | 当前适配器使用的 Provider。本文件只配置 MinerU。 |
-| `FASTGPT_OCR_API_PROFILE` | `mineru-api-v3` | Provider 的接口版本配置。必须与 Provider 版本匹配。 |
-| `FASTGPT_OCR_PROVIDER_VERSION` | `3.4.4` | readiness 展示和校验的预期版本。 |
-| `ports` 第一个地址 | `127.0.0.1` | FastGPT 跨主机访问时改为适配器服务器私网 IP。 |
-| `MINERU_API_MAX_CONCURRENT_REQUESTS` | `1` | MinerU Core 自身并发上限，建议与适配器执行并发一致。 |
-| `MINERU_API_TASK_RETENTION_SECONDS` | `900` | MinerU Core 任务临时信息保留时间。 |
-| `MINERU_PROCESSING_WINDOW_SIZE` | `1` | MinerU Pipeline 处理窗口；显存紧张时保持 1。 |
-| `cpus` / `mem_limit` | `8` / `24g` | MinerU Core CPU 和内存限制。 |
-| `shm_size` | `16gb` | Core 的共享内存大小；文档较大时不要随意调小。 |
-| `/work/output` tmpfs | `8g` | 解析输出临时空间上限，容器重启后清空。 |
-| volume `name` | `fastgpt-ocr-mineru-models` | 模型持久化卷名称。不要在运行中随意修改，否则会重新下载模型。 |
+| `FASTGPT_OCR_MAX_CONCURRENT_REQUESTS` | `1` | 同时调用上游 OCR 的请求数。 |
+| `FASTGPT_OCR_MAX_QUEUED_REQUESTS` | `1` | 执行槽满时允许等待的请求数。 |
+| `FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS` | `60` | 最长排队时间；生产环境建议调为 15-30 秒。 |
+| `ports` | `8001:8001` | Adapter 对外端口。应通过防火墙限制为 FastGPT 可访问。 |
+| `cpus` / `mem_limit` | `1` / `512m` | Adapter 自身资源限制，不代表 OCR 服务资源。 |
 
-## 常见问题
-
-### `mineru-core` 一直 unhealthy
-
-先看日志：
+## 健康检查
 
 ```bash
-docker compose logs --tail=200 mineru-core
+curl -fsS http://127.0.0.1:8001/health/ready
 ```
 
-常见原因是 GPU 不可用、模型仍在下载、显存或内存不足。宿主机先确认：
+返回内容包含：
+
+```json
+{
+  "status": "ready",
+  "provider": "mineru",
+  "api_profile": "mineru-api-v3",
+  "version": "3.4.4"
+}
+```
+
+如果 Adapter 显示 `unhealthy`，先检查上游地址：
 
 ```bash
-nvidia-smi
-docker run --rm --gpus all nvidia/cuda:12.9.0-base-ubuntu24.04 nvidia-smi
+docker compose logs --tail=200 adapter
+curl http://<OCR服务器地址>:8000/health
 ```
 
-### 返回 `503 PARSER_BUSY` 或 `503 QUEUE_TIMEOUT`
+Marker 的就绪检查使用 `/openapi.json`。MinerU 和 Marker 都由客户独立维护，Adapter
+不会下载模型，也不需要 GPU。
 
-这表示适配器正在保护上游服务。只有在确认 MinerU 能承受并发、并且显存足够时，
-才提高 `FASTGPT_OCR_MAX_CONCURRENT_REQUESTS` 和 `MINERU_API_MAX_CONCURRENT_REQUESTS`。
+## 官方 OCR 部署资料
 
-### FastGPT 连接不上
+- MinerU Docker：https://opendatalab.github.io/MinerU/quick_start/docker_deployment/
+- MinerU 使用说明：https://opendatalab.github.io/MinerU/usage/quick_usage/
+- Marker 2.x：https://github.com/datalab-to/marker/blob/master/README.md
+- Marker 1.10：https://github.com/datalab-to/marker/blob/v1.10.2/README.md
 
-确认 FastGPT 使用的是：
-
-```text
-http://<适配器服务器私网IP>:8001/v2/parse/file
-```
-
-并检查服务器防火墙、端口映射中的监听地址和 Token 是否一致。不要把 URL 写成
-`/file_parse`，那是 MinerU Core 的内部接口。
-
-## 停止和回退
+## 停止
 
 ```bash
 docker compose down
 ```
 
-这不会删除模型卷。需要重新启用时直接执行 `docker compose up -d`。
-只有确认要重新下载模型才删除卷：
-
-```bash
-docker volume rm fastgpt-ocr-mineru-models
-```
+这只停止 Adapter，不会影响客户自己的 OCR 服务。

@@ -217,9 +217,9 @@ docker volume rm fastgpt-ocr-mineru-models
 ### 给客户的单文件交付
 
 不需要把整个仓库交给客户时，直接提供 [`deploy/customer/docker-compose.yml`](deploy/customer/docker-compose.yml)。
-这份文件不引用 `.env`，同时启动适配器和 MinerU Core；客户只需把 YAML 中标记为“必填”的
-镜像地址和 Token 占位符替换掉即可。参数、登录镜像仓库、FastGPT 环境变量和故障处理步骤见
-[`deploy/customer/README.md`](deploy/customer/README.md)。
+这份文件不引用 `.env`，也不启动任何 OCR 服务，只运行 Adapter 中间件。客户在 YAML 中
+选择 Provider、API Profile 和已经部署好的 OCR 服务地址，并替换 Token 占位符即可。
+参数、FastGPT 环境变量和故障处理步骤见 [`deploy/customer/README.md`](deploy/customer/README.md)。
 
 ## 连接外部 Marker
 
