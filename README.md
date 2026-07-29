@@ -19,13 +19,16 @@ FastGPT
 这里没有修改 MinerU 或 Marker 的源码，也没有使用 FastGPT 仓库里改造过的 Marker。
 上游 OCR 服务仍按官方方式部署。
 
-## 支持范围
+## Provider 清单
 
-| OCR 服务 | API Profile | 支持版本 | 备注 |
-|---|---|---|---|
-| MinerU | `mineru-api-v3` | `3.4.4` | 调用官方 `/file_parse` |
-| Marker | `marker-server-v1` | `>=1.8,<2.0` | 已验证 `1.10.2`，不发送 `mode` |
-| Marker | `marker-server-v2` | `2.0.0` | 发送 `mode=balanced/fast` |
+当前实现了 2 个 Provider、3 个 API Profile。Provider 决定使用哪套上游驱动，
+API Profile 决定该驱动采用哪一版请求字段、响应校验和健康检查逻辑。
+
+| Provider | API Profile | 支持版本 | 上游接口 | 主要配置 |
+|---|---|---|---|---|
+| `mineru` | `mineru-api-v3` | `==3.4.4` | 官方 `/file_parse` | `MINERU_BASE_URL` |
+| `marker` | `marker-server-v1` | `>=1.8,<2.0` | 官方 `/marker/upload` | `MARKER_BASE_URL`、`MARKER_FORCE_OCR` |
+| `marker` | `marker-server-v2` | `==2.0.0` | 官方 `/marker/upload` | v1 配置加 `MARKER_MODE` |
 
 一个适配器实例只连接一个 OCR 服务。换 OCR 服务或版本时，需要修改环境变量并重启
 适配器，不支持在单次请求里动态选择。
@@ -378,6 +381,16 @@ class ParserProvider(Protocol):
 
 公共 FastGPT 路由不应该出现某个 OCR 服务的字段名，也不接受任意 JSONPath 或透传
 规则。
+
+新增或修改 Provider 时，以下内容必须在同一个提交中完成：
+
+- 更新 `providers/registry.py` 中的 Provider、API Profile 和版本范围。
+- 增加驱动单元测试、协议测试和异常响应测试。
+- 更新本 README 的“Provider 清单”和官方部署资料。
+- 更新 `deploy/customer/README.md` 的 Provider 清单与配置示例。
+- 新增专属环境变量时，同步更新客户 Compose 和配置说明。
+
+CI 会比较代码注册表与两份 README。注册表中出现未记录的 Profile 时，测试会失败。
 
 ## 本地开发
 

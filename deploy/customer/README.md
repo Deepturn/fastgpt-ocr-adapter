@@ -9,6 +9,17 @@
 FastGPT -> Adapter:8001 -> 客户自己的 MinerU / Marker
 ```
 
+## 当前 Provider 清单
+
+| Provider | API Profile | 支持版本 | 客户需要配置 |
+| --- | --- | --- | --- |
+| `mineru` | `mineru-api-v3` | `==3.4.4` | `MINERU_BASE_URL` |
+| `marker` | `marker-server-v1` | `>=1.8,<2.0` | `MARKER_BASE_URL`、`MARKER_FORCE_OCR` |
+| `marker` | `marker-server-v2` | `==2.0.0` | v1 配置加 `MARKER_MODE` |
+
+这张表与代码注册表保持一致。以后新增 Provider 或 API Profile 时，必须在同一个提交中
+更新这张表、下面的配置示例和官方部署资料；CI 会检查是否遗漏表格记录。
+
 ## 1. 下载 YAML
 
 ```bash
