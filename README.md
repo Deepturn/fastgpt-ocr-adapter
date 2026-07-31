@@ -16,7 +16,7 @@
 
 ## 最快上手
 
-如果你只是想先跑起来，直接用 `deploy/customer/docker-compose.yml`。
+如果你只是想先跑起来，直接用 `deploy/standalone/docker-compose.yml`。
 这份文件不需要 `.env`，把里面的占位符换掉就行。
 
 1. 先把 OCR 服务单独跑起来。
@@ -30,7 +30,7 @@
 2. 启动 Adapter。
 
    ```bash
-   docker compose -f deploy/customer/docker-compose.yml up -d
+   docker compose -f deploy/standalone/docker-compose.yml up -d
    ```
 
 3. 改好这几个值。
@@ -81,9 +81,9 @@
 - 解析时报 `415`，多半是上传的不是 PDF。
 - 解析时报 `503`，通常是队列满了，或者上游 OCR 不可用。
 
-## 单文件交付
+## 单容器部署示例
 
-如果你要直接给客户一份文件，就看 [`deploy/customer/docker-compose.yml`](deploy/customer/docker-compose.yml) 和 [`deploy/customer/README.md`](deploy/customer/README.md)。
+如果你只想启动 Adapter，不想使用根目录的 `.env` 方式，就看 [`deploy/standalone/docker-compose.yml`](deploy/standalone/docker-compose.yml) 和 [`deploy/standalone/README.md`](deploy/standalone/README.md)。
 
 ## 许可证
 

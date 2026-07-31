@@ -2,42 +2,42 @@ name: fastgpt-ocr-adapter
 
 services:
   adapter:
-    # 已发布的中间件镜像。使用其他镜像仓库时只替换这一行。
-    image: crpi-g79ks4g398u6l56b.cn-hangzhou.personal.cr.aliyuncs.com/fastgpt-ocr-adapter/adapter:0.1.0
+    # 使用私有镜像仓库时，只替换这一行。
+    image: ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.0
     restart: unless-stopped
     environment:
-      # 对外鉴权：必须替换，并与 FastGPT 的 CUSTOM_PDF_PARSE_KEY 保持一致。
+      # 必须替换，并和 FastGPT 的 CUSTOM_PDF_PARSE_KEY 保持一致。
       FASTGPT_OCR_AUTH_TOKEN: REPLACE_WITH_RANDOM_TOKEN
       FASTGPT_OCR_REQUIRE_AUTH: "true"
 
-      # 当前启用的处理驱动。下面默认选择 MinerU 3.4.4。
+      # 默认连接 MinerU 3.4.4。换 OCR 服务时，改这里的 Provider 和 Profile。
       FASTGPT_OCR_PROVIDER: mineru
       FASTGPT_OCR_API_PROFILE: mineru-api-v3
       FASTGPT_OCR_PROVIDER_VERSION: "3.4.4"
 
-      # MinerU 驱动地址。OCR 在宿主机时可使用当前值；在其他机器时改成实际地址。
+      # MinerU 服务地址。OCR 跑在其他机器上时，改成那台机器的私网地址。
       MINERU_BASE_URL: http://host.docker.internal:8000
 
-      # Marker 驱动参数。仅当 Provider 改成 marker 时使用。
+      # Marker 参数。只有 FASTGPT_OCR_PROVIDER=marker 时才会用到。
       MARKER_BASE_URL: http://host.docker.internal:8000
       MARKER_FORCE_OCR: "false"
       MARKER_MODE: balanced
       MARKER_AUTH_TOKEN: ""
 
-      # FastGPT 单次调用窗口为 600 秒，因此解析超时必须小于 600 秒。
+      # FastGPT 单次调用窗口通常是 600 秒，解析超时不要超过它。
       FASTGPT_OCR_TIMEOUT_SECONDS: "540"
       FASTGPT_OCR_MAX_FILE_BYTES: "52428800"
       FASTGPT_OCR_MAX_PAGES: "500"
 
-      # 单进程有界队列。默认同时执行 1 个请求，额外等待 1 个请求。
+      # 默认同时解析 1 个请求，额外允许 1 个请求排队。
       FASTGPT_OCR_MAX_CONCURRENT_REQUESTS: "1"
       FASTGPT_OCR_MAX_QUEUED_REQUESTS: "1"
       FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS: "60"
     ports:
-      # 会监听服务器所有网卡。请用防火墙只允许 FastGPT 服务器访问 8001。
+      # 会监听服务器所有网卡。生产环境建议只允许 FastGPT 服务器访问 8001。
       - "8001:8001"
     extra_hosts:
-      # 让 Linux 容器可以访问部署在宿主机上的 OCR 服务。
+      # 让 Linux 容器能访问宿主机上的 OCR 服务。
       - "host.docker.internal:host-gateway"
     read_only: true
     tmpfs:

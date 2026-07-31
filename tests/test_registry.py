@@ -50,7 +50,7 @@ def test_registry_lists_all_profiles() -> None:
     "document",
     [
         PROJECT_ROOT / "README.md",
-        PROJECT_ROOT / "deploy" / "customer" / "README.md",
+        PROJECT_ROOT / "deploy" / "standalone" / "README.md",
     ],
 )
 def test_registered_profiles_are_documented(document: Path) -> None:
