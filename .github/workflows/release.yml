@@ -20,7 +20,6 @@ permissions:
 env:
   REGISTRY: ghcr.io
   ADAPTER_IMAGE: ghcr.io/deepturn/fastgpt-ocr-adapter
-  MINERU_IMAGE: ghcr.io/deepturn/fastgpt-mineru-core
 
 jobs:
   publish:
@@ -54,18 +53,5 @@ jobs:
             ${{ env.ADAPTER_IMAGE }}:sha-${{ github.sha }}
           provenance: mode=max
           sbom: true
-      - name: Build and publish MinerU 3.4.4 core
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/mineru/Dockerfile
-          push: true
-          tags: |
-            ${{ env.MINERU_IMAGE }}:3.4.4-cu129
-            ${{ env.MINERU_IMAGE }}:sha-${{ github.sha }}
-          provenance: mode=max
-          sbom: true
       - name: Inspect published images
-        run: |
-          docker buildx imagetools inspect "${ADAPTER_IMAGE}:sha-${GITHUB_SHA}"
-          docker buildx imagetools inspect "${MINERU_IMAGE}:sha-${GITHUB_SHA}"
+        run: docker buildx imagetools inspect "${ADAPTER_IMAGE}:sha-${GITHUB_SHA}"

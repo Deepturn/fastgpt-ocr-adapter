@@ -33,6 +33,7 @@ jobs:
       - run: docker compose config --quiet
       - run: docker compose -f deploy/mineru/docker-compose.yml config --quiet
       - run: docker compose -f deploy/marker/docker-compose.yml config --quiet
+      - run: docker compose -f deploy/customer/docker-compose.yml config --quiet
 
   adapter-image:
     runs-on: ubuntu-latest

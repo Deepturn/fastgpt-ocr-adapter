@@ -10,9 +10,8 @@ separate upstream projects and are not vendored here.
 - License: review the license shipped with the selected MinerU release
 - Models: Pipeline model weights have separate terms
 
-The optional MinerU image installs the official `mineru[pipeline]==3.4.4`
-package and downloads its Pipeline models. Review both the code and model
-licenses before providing a commercial service.
+This project does not build or distribute a MinerU model image. Users deploy
+the selected official MinerU release and remain responsible for its license.
 
 ## Marker
 

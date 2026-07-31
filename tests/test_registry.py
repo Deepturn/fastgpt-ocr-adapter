@@ -11,6 +11,17 @@ from fastgpt_ocr_adapter.providers import create_provider, get_provider_spec, pr
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _markdown_table_cells(content: str) -> set[tuple[str, ...]]:
+    rows: set[tuple[str, ...]] = set()
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = tuple(cell.strip() for cell in stripped.strip("|").split("|"))
+        rows.add(cells)
+    return rows
+
+
 @pytest.mark.parametrize(
     ("profile", "version"),
     [
@@ -44,11 +55,14 @@ def test_registry_lists_all_profiles() -> None:
 )
 def test_registered_profiles_are_documented(document: Path) -> None:
     content = document.read_text(encoding="utf-8")
+    table_rows = _markdown_table_cells(content)
     for spec in provider_specs():
-        table_prefix = (
-            f"| `{spec.name}` | `{spec.api_profile}` | `{spec.supported_versions}` |"
+        expected = (
+            f"`{spec.name}`",
+            f"`{spec.api_profile}`",
+            f"`{spec.supported_versions}`",
         )
-        assert table_prefix in content, (
+        assert any(row[:3] == expected for row in table_rows), (
             f"{document.relative_to(PROJECT_ROOT)} must document "
             f"{spec.name}/{spec.api_profile} ({spec.supported_versions})"
         )

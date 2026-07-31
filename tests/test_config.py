@@ -10,6 +10,7 @@ def test_defaults_select_mineru() -> None:
     assert settings.provider == "mineru"
     assert settings.api_profile == "mineru-api-v3"
     assert settings.provider_version == "3.4.4"
+    assert settings.mineru_base_url == "http://host.docker.internal:8000"
     assert settings.max_concurrent_requests == 1
     assert settings.max_queued_requests == 1
 

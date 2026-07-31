@@ -13,22 +13,22 @@ OCR 服务的版本修改请求参数。适配器负责鉴权、PDF 检查、排
 FastGPT
   -> POST /v2/parse/file
   -> FastGPT OCR Adapter
-  -> MinerU 或 Marker
+  -> 客户自己部署的 MinerU / Marker / 其他已支持 OCR 服务
 ```
 
-这里没有修改 MinerU 或 Marker 的源码，也没有使用 FastGPT 仓库里改造过的 Marker。
-上游 OCR 服务仍按官方方式部署。
+这里没有修改 MinerU 或 Marker 的源码，也不发布任何 OCR 模型镜像。OCR 服务按官方方式
+独立部署，Adapter 只通过 Provider/Profile 连接它。
 
 ## Provider 清单
 
 当前实现了 2 个 Provider、3 个 API Profile。Provider 决定使用哪套上游驱动，
 API Profile 决定该驱动采用哪一版请求字段、响应校验和健康检查逻辑。
 
-| Provider | API Profile | 支持版本 | 上游接口 | 主要配置 |
-|---|---|---|---|---|
-| `mineru` | `mineru-api-v3` | `==3.4.4` | 官方 `/file_parse` | `MINERU_BASE_URL` |
+| Provider | API Profile        | 支持版本         | 上游接口                | 主要配置                                 |
+| -------- | ------------------ | ------------ | ------------------- | ------------------------------------ |
+| `mineru` | `mineru-api-v3`    | `==3.4.4`    | 官方 `/file_parse`    | `MINERU_BASE_URL`                    |
 | `marker` | `marker-server-v1` | `>=1.8,<2.0` | 官方 `/marker/upload` | `MARKER_BASE_URL`、`MARKER_FORCE_OCR` |
-| `marker` | `marker-server-v2` | `==2.0.0` | 官方 `/marker/upload` | v1 配置加 `MARKER_MODE` |
+| `marker` | `marker-server-v2` | `==2.0.0`    | 官方 `/marker/upload` | v1 配置加 `MARKER_MODE`                 |
 
 一个适配器实例只连接一个 OCR 服务。换 OCR 服务或版本时，需要修改环境变量并重启
 适配器，不支持在单次请求里动态选择。
@@ -175,47 +175,36 @@ services:
 如果 FastGPT 在另一台机器，把 `FASTGPT_OCR_BIND` 改成宿主机的私网地址或 `0.0.0.0`，
 同时使用防火墙只允许 FastGPT 服务器访问 8001。不要把这个端口直接映射到公网。
 
-## 一起部署 MinerU 3.4.4
+## 连接外部 MinerU 3.4.4
 
-仓库提供了完整的 NVIDIA GPU 示例：
-
-```bash
-docker compose -f deploy/mineru/docker-compose.yml up -d --build
-docker compose -f deploy/mineru/docker-compose.yml logs -f mineru-core
-```
-
-这个 Compose 会启动：
-
-- `mineru-core`：官方 `mineru[pipeline]==3.4.4`。
-- `adapter`：只对外发布 8001。
-- `mineru-models`：保存模型和 `mineru.json`，容器重建后不用重新下载。
-- `/work/output`：有容量限制的临时文件系统，不长期保存解析结果。
-
-第一次启动会从 ModelScope 下载 Pipeline 模型，时间取决于网络。模型下载完成之前，
-readiness 不会通过。
-
-建议的最低资源：
-
-- Linux x86_64。
-- 8 vCPU。
-- 24 GiB 内存。
-- 1 张至少 8 GiB 显存的 NVIDIA GPU。
-- NVIDIA Container Toolkit，`docker run --gpus all` 能正常看到 GPU。
-
-MinerU Core 基于锁定 digest 的 CUDA 12.9 vLLM 镜像。宿主机驱动必须支持对应 CUDA
-运行时。适配器和 MinerU 默认都只允许一个执行请求。
-
-停止容器不会删除模型：
+MinerU 服务请按官方文档单独部署。本项目只提供 Adapter 连接 MinerU 的 Compose 示例，
+不会启动 MinerU Core，也不会下载模型：
 
 ```bash
-docker compose -f deploy/mineru/docker-compose.yml down
+docker compose -f deploy/mineru/docker-compose.yml up -d
+docker compose -f deploy/mineru/docker-compose.yml logs -f adapter
 ```
 
-只有明确需要重新下载模型时才删除卷：
+这个 Compose 只启动 `adapter`，默认读取 `.env`，并使用：
 
-```bash
-docker volume rm fastgpt-ocr-mineru-models
+```dotenv
+FASTGPT_OCR_PROVIDER=mineru
+FASTGPT_OCR_API_PROFILE=mineru-api-v3
+FASTGPT_OCR_PROVIDER_VERSION=3.4.4
+MINERU_BASE_URL=http://host.docker.internal:8000
 ```
+
+如果 MinerU 在另一台服务器，把 `MINERU_BASE_URL` 改成那台服务器的私网地址。只写
+服务根地址，不要加 `/file_parse`。
+
+MinerU 官方资料：
+
+- [Docker 部署教程](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/)
+- [快速使用和 API 说明](https://opendatalab.github.io/MinerU/usage/quick_usage/)
+- [MinerU 3.4.4 Release](https://github.com/opendatalab/MinerU/releases/tag/mineru-3.4.4-released)
+
+MinerU 是否需要 GPU、模型卷、缓存目录、并发参数，都由它自己的部署决定。Adapter 的
+并发参数只控制进入 MinerU 的请求数量。
 
 ### 给客户的单文件交付
 
@@ -339,18 +328,18 @@ Marker 官方接口没有可靠的软件版本字段，所以健康响应中的 
 
 ## 常见错误
 
-| 状态码 | error | 含义 |
-|---|---|---|
-| 400 | `EMPTY_FILE` / `INVALID_PDF` / `ENCRYPTED_PDF` | PDF 为空、损坏或加密 |
-| 401 | `UNAUTHORIZED` | FastGPT Token 不一致 |
-| 413 | `FILE_TOO_LARGE` / `PAGE_LIMIT_EXCEEDED` | 超过大小或页数限制 |
-| 415 | `UNSUPPORTED_MEDIA_TYPE` / `INVALID_PDF_TYPE` | 不是 PDF |
-| 503 | `PARSER_BUSY` | 执行槽和等待位都满了 |
-| 503 | `QUEUE_TIMEOUT` | 排队超过设置时间 |
-| 503 | `CORE_UNAVAILABLE` | OCR 服务连接失败 |
-| 502 | `CORE_PARSE_FAILED` | OCR 解析失败或返回结构不对 |
-| 502 | `IMAGE_CONVERSION_FAILED` | Markdown 图片与图片数据对不上 |
-| 504 | `CORE_TIMEOUT` | OCR 执行超过上游超时 |
+| 状态码 | error                                          | 含义                  |
+| --- | ---------------------------------------------- | ------------------- |
+| 400 | `EMPTY_FILE` / `INVALID_PDF` / `ENCRYPTED_PDF` | PDF 为空、损坏或加密        |
+| 401 | `UNAUTHORIZED`                                 | FastGPT Token 不一致   |
+| 413 | `FILE_TOO_LARGE` / `PAGE_LIMIT_EXCEEDED`       | 超过大小或页数限制           |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` / `INVALID_PDF_TYPE`  | 不是 PDF              |
+| 503 | `PARSER_BUSY`                                  | 执行槽和等待位都满了          |
+| 503 | `QUEUE_TIMEOUT`                                | 排队超过设置时间            |
+| 503 | `CORE_UNAVAILABLE`                             | OCR 服务连接失败          |
+| 502 | `CORE_PARSE_FAILED`                            | OCR 解析失败或返回结构不对     |
+| 502 | `IMAGE_CONVERSION_FAILED`                      | Markdown 图片与图片数据对不上 |
+| 504 | `CORE_TIMEOUT`                                 | OCR 执行超过上游超时        |
 
 日志只记录请求 ID、文件大小、页数、耗时、HTTP 状态和上游状态，不记录 Token、PDF
 内容、Markdown 或图片 Base64。排查时可以用响应头 `X-Request-ID` 对应日志。
@@ -416,15 +405,6 @@ Marker 2.0.0 服务。
 ```text
 命名空间：fastgpt-ocr-adapter
 仓库名：adapter
-仓库类型：私有
-代码源：本地仓库
-```
-
-如果还要把自带 GPU 的 MinerU Core 一起放到 ACR，再建第二个仓库：
-
-```text
-命名空间：fastgpt-ocr-adapter
-仓库名：mineru-core
 仓库类型：私有
 代码源：本地仓库
 ```
@@ -506,8 +486,7 @@ Secrets:
 ```
 
 然后打开 `Actions → Publish images to Alibaba ACR → Run workflow`，版本填
-`0.1.0`。第一次只发布适配器，确认 ACR 仓库和拉取权限都正常后，再按需勾选
-`publish_mineru_core`。MinerU Core 只构建 `linux/amd64`，需要 NVIDIA GPU 的部署机。
+`0.1.0`。这个工作流只发布 Adapter 镜像，不发布 MinerU、Marker 或其他 OCR 服务镜像。
 
 工作流不会自动读取你的阿里云账号密码，也不会在仓库里保存密码；只从 GitHub Actions
 Secret 读取。若 ACR 实例未开启公网访问，GitHub-hosted runner 无法推送，应改为在能
@@ -520,14 +499,12 @@ Secret 读取。若 ACR 实例未开启公网访问，GitHub-hosted runner 无�
 ```text
 ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.0
 ghcr.io/deepturn/fastgpt-ocr-adapter:sha-<commit>
-ghcr.io/deepturn/fastgpt-mineru-core:3.4.4-cu129
-ghcr.io/deepturn/fastgpt-mineru-core:sha-<commit>
 ```
 
 GHCR 包由发布工作流推送。若包仍保持私有，拉取前先执行
 `docker login ghcr.io`；如果希望按上面的默认 Compose 配置匿名拉取，需要在 GitHub
-的 `Packages → fastgpt-ocr-adapter` 和 `Packages → fastgpt-mineru-core` 设置里把可见性
-改为 Public。阿里云 ACR 的私有镜像不受这个设置影响，仍需单独登录 ACR。
+的 `Packages → fastgpt-ocr-adapter` 设置里把可见性改为 Public。阿里云 ACR 的私有
+镜像不受这个设置影响，仍需单独登录 ACR。
 
 ## 许可证
 
@@ -535,4 +512,4 @@ GHCR 包由发布工作流推送。若包仍保持私有，拉取前先执行
 
 MinerU、Marker、它们的模型权重和基础镜像有各自的许可证。本仓库不改变这些条款。
 对外提供商业服务前，请按实际使用的版本检查上游代码和模型许可证。详情见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+[THIRD\_PARTY\_NOTICES.md](THIRD_PARTY_NOTICES.md)。

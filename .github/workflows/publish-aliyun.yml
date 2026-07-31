@@ -7,11 +7,6 @@ on:
         description: Adapter image tag, for example 0.1.0
         required: true
         default: 0.1.0
-      publish_mineru_core:
-        description: Also publish the MinerU 3.4.4 CUDA core image
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -55,15 +50,3 @@ jobs:
           tags: |
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/adapter:${{ inputs.version }}
             ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/adapter:sha-${{ github.sha }}
-
-      - name: Build and push MinerU 3.4.4 core
-        if: ${{ inputs.publish_mineru_core }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/mineru/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/mineru-core:3.4.4-cu129
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/mineru-core:sha-${{ github.sha }}

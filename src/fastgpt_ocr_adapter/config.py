@@ -62,7 +62,7 @@ class Settings:
     max_concurrent_requests: int = 1
     max_queued_requests: int = 1
     queue_timeout_seconds: float = 60.0
-    mineru_base_url: str = "http://mineru-core:8000"
+    mineru_base_url: str = "http://host.docker.internal:8000"
     marker_base_url: str = "http://host.docker.internal:8000"
     marker_force_ocr: bool = False
     marker_mode: str = "balanced"
