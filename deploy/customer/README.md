@@ -1,107 +1,49 @@
 # 客户部署文件
 
-这份 Compose 只启动 FastGPT OCR Adapter，不启动、不内嵌 MinerU 或 Marker。
+这份 `docker-compose.yml` 只启动 FastGPT OCR Adapter，不带 OCR 模型，也不需要 `.env`。
+把里面的占位符换成你自己的值，就能直接用。
 
-客户先按官方方式部署自己的 OCR 服务，再通过 YAML 中的 `Provider + API Profile + 上游地址`
-选择对应驱动。一个 Adapter 实例只连接一种 OCR 服务；切换后需要重启容器。
+## 现在支持什么
 
-```text
-FastGPT -> Adapter:8001 -> 客户自己的 MinerU / Marker
-```
-
-## 当前 Provider 清单
-
-| Provider | API Profile | 支持版本 | 客户需要配置 |
+| Provider | API Profile | 支持版本 | 你要填的东西 |
 | --- | --- | --- | --- |
 | `mineru` | `mineru-api-v3` | `==3.4.4` | `MINERU_BASE_URL` |
 | `marker` | `marker-server-v1` | `>=1.8,<2.0` | `MARKER_BASE_URL`、`MARKER_FORCE_OCR` |
 | `marker` | `marker-server-v2` | `==2.0.0` | v1 配置加 `MARKER_MODE` |
 
-这张表与代码注册表保持一致。以后新增 Provider 或 API Profile 时，必须在同一个提交中
-更新这张表、下面的配置示例和官方部署资料；CI 会检查是否遗漏表格记录。
+这张表和代码是一一对应的。以后如果要加新的 Provider，表和代码要一起改。
 
-## 1. 下载 YAML
+## 你只需要改这几处
 
-```bash
-curl -fsSLo docker-compose.yml \
-  https://raw.githubusercontent.com/Deepturn/fastgpt-ocr-adapter/main/deploy/customer/docker-compose.yml
-```
+1. `FASTGPT_OCR_AUTH_TOKEN`
 
-不需要 `.env` 文件。
+   这是 Adapter 对外的密码。随便生成一个 32 位左右的随机串就行，FastGPT 里也要填同一个值。
 
-## 2. 修改 Token
+2. `FASTGPT_OCR_PROVIDER` / `FASTGPT_OCR_API_PROFILE` / `FASTGPT_OCR_PROVIDER_VERSION`
 
-生成一个随机 Token：
+   - 用 MinerU 就选 `mineru` + `mineru-api-v3`
+   - 用 Marker 1.x 就选 `marker` + `marker-server-v1`
+   - 用 Marker 2.0.0 就选 `marker` + `marker-server-v2`
 
-```bash
-openssl rand -hex 32
-```
+3. OCR 服务地址
 
-把 YAML 中的占位符替换成生成结果：
+   - MinerU：填 `MINERU_BASE_URL`
+   - Marker：填 `MARKER_BASE_URL`
+   - 如果 OCR 跑在同一台机器上，可以用 `http://host.docker.internal:8000`
+   - 如果 OCR 跑在别的机器上，就填那台机器的私网 IP
 
-```yaml
-FASTGPT_OCR_AUTH_TOKEN: REPLACE_WITH_RANDOM_TOKEN
-```
+4. Marker 额外参数
 
-这个值还需要配置到 FastGPT 的 `CUSTOM_PDF_PARSE_KEY`。
+   - `MARKER_FORCE_OCR`：一般先用 `false`
+   - `MARKER_MODE`：只给 Marker v2 用，常用 `balanced`
+   - `MARKER_AUTH_TOKEN`：上游 Marker 自己还要鉴权时再填
 
-## 3. 选择 OCR 驱动
+## 怎么启动
 
-### MinerU 3.4.4
-
-```yaml
-FASTGPT_OCR_PROVIDER: mineru
-FASTGPT_OCR_API_PROFILE: mineru-api-v3
-FASTGPT_OCR_PROVIDER_VERSION: "3.4.4"
-MINERU_BASE_URL: http://实际MinerU地址:8000
-```
-
-`MINERU_BASE_URL` 只写服务根地址，不要加 `/file_parse`。
-
-### Marker 1.8-1.10
-
-```yaml
-FASTGPT_OCR_PROVIDER: marker
-FASTGPT_OCR_API_PROFILE: marker-server-v1
-FASTGPT_OCR_PROVIDER_VERSION: "1.10.2"
-MARKER_BASE_URL: http://实际Marker地址:8000
-MARKER_FORCE_OCR: "false"
-```
-
-### Marker 2.0.0
-
-```yaml
-FASTGPT_OCR_PROVIDER: marker
-FASTGPT_OCR_API_PROFILE: marker-server-v2
-FASTGPT_OCR_PROVIDER_VERSION: "2.0.0"
-MARKER_BASE_URL: http://实际Marker地址:8000
-MARKER_FORCE_OCR: "false"
-MARKER_MODE: balanced
-```
-
-Marker 的 `balanced` 更偏向质量，`fast` 更偏向速度。不同 OCR 版本不能只改版本号，
-必须同时选择匹配的 API Profile。
-
-OCR 服务部署在 Adapter 宿主机时，可以使用：
-
-```yaml
-MINERU_BASE_URL: http://host.docker.internal:8000
-```
-
-OCR 服务部署在其他服务器时，改成那台服务器的私网 IP。不要填写 `127.0.0.1`，
-因为容器里的 `127.0.0.1` 指向 Adapter 容器自己。
-
-## 4. 启动
-
-阿里云 ACR 是私有仓库时先登录：
+如果你是直接拿这个文件用：
 
 ```bash
 docker login crpi-g79ks4g398u6l56b.cn-hangzhou.personal.cr.aliyuncs.com
-```
-
-然后启动：
-
-```bash
 docker compose config
 docker compose pull
 docker compose up -d
@@ -109,19 +51,17 @@ docker compose ps
 docker compose logs -f adapter
 ```
 
-`docker compose ps` 中显示 `healthy`，说明 Adapter 已连接到所选 OCR 服务且接口结构匹配。
+如果 `docker compose ps` 里显示 `healthy`，就说明 Adapter 已经连上你选的 OCR 服务了。
 
-## 5. 接入 FastGPT
-
-在 FastGPT 中配置：
+## FastGPT 里怎么填
 
 ```dotenv
 CUSTOM_PDF_PARSE_URL=http://<Adapter服务器私网IP>:8001/v2/parse/file
-CUSTOM_PDF_PARSE_KEY=YAML中的FASTGPT_OCR_AUTH_TOKEN
+CUSTOM_PDF_PARSE_KEY=YAML 里的 FASTGPT_OCR_AUTH_TOKEN
 customPdfParse=true
 ```
 
-测试 Adapter：
+## 先测一下
 
 ```bash
 curl -fS -X POST http://127.0.0.1:8001/v2/parse/file \
@@ -129,7 +69,7 @@ curl -fS -X POST http://127.0.0.1:8001/v2/parse/file \
   -F "file=@sample.pdf"
 ```
 
-成功响应格式：
+成功的话，会返回：
 
 ```json
 {
@@ -140,62 +80,20 @@ curl -fS -X POST http://127.0.0.1:8001/v2/parse/file \
 }
 ```
 
-## 参数说明
+## 常见坑
 
-| 参数 | 默认值 | 作用 |
-| --- | --- | --- |
-| `adapter.image` | ACR `adapter:0.1.0` | 中间件镜像地址。它不包含 OCR 模型。 |
-| `FASTGPT_OCR_AUTH_TOKEN` | 占位符 | 必填。必须与 FastGPT 的 `CUSTOM_PDF_PARSE_KEY` 相同。 |
-| `FASTGPT_OCR_PROVIDER` | `mineru` | 驱动名称，目前支持 `mineru`、`marker`。 |
-| `FASTGPT_OCR_API_PROFILE` | `mineru-api-v3` | 具体接口处理逻辑，必须与 OCR 版本匹配。 |
-| `FASTGPT_OCR_PROVIDER_VERSION` | `3.4.4` | 预期 OCR 版本，用于健康检查和版本约束。 |
-| `MINERU_BASE_URL` | 宿主机 8000 | MinerU 服务根地址，仅 MinerU 驱动使用。 |
-| `MARKER_BASE_URL` | 宿主机 8000 | Marker 服务根地址，仅 Marker 驱动使用。 |
-| `MARKER_FORCE_OCR` | `false` | 是否强制 Marker 使用 OCR。 |
-| `MARKER_MODE` | `balanced` | Marker 2.0.0 模式，可选 `balanced`、`fast`。 |
-| `MARKER_AUTH_TOKEN` | 空 | Marker 上游存在 Bearer 鉴权时填写。 |
-| `FASTGPT_OCR_TIMEOUT_SECONDS` | `540` | 调用 OCR 服务的超时时间，必须小于 600 秒。 |
-| `FASTGPT_OCR_MAX_FILE_BYTES` | `52428800` | PDF 大小上限，即 50 MiB。 |
-| `FASTGPT_OCR_MAX_PAGES` | `500` | PDF 页数上限。 |
-| `FASTGPT_OCR_MAX_CONCURRENT_REQUESTS` | `1` | 同时调用上游 OCR 的请求数。 |
-| `FASTGPT_OCR_MAX_QUEUED_REQUESTS` | `1` | 执行槽满时允许等待的请求数。 |
-| `FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS` | `60` | 最长排队时间；生产环境建议调为 15-30 秒。 |
-| `ports` | `8001:8001` | Adapter 对外端口。应通过防火墙限制为 FastGPT 可访问。 |
-| `cpus` / `mem_limit` | `1` / `512m` | Adapter 自身资源限制，不代表 OCR 服务资源。 |
+- `127.0.0.1` 只能给同一台机器用，别拿去填另一台机器的 OCR 地址。
+- 如果 OCR 在别的机器上，别写容器名，要写那台机器的私网 IP。
+- `503` 一般是队列满了，或者上游 OCR 忙了。
+- `415` 一般是传了不是 PDF 的文件。
 
-## 健康检查
+## 官方 OCR 资料
 
-```bash
-curl -fsS http://127.0.0.1:8001/health/ready
-```
-
-返回内容包含：
-
-```json
-{
-  "status": "ready",
-  "provider": "mineru",
-  "api_profile": "mineru-api-v3",
-  "version": "3.4.4"
-}
-```
-
-如果 Adapter 显示 `unhealthy`，先检查上游地址：
-
-```bash
-docker compose logs --tail=200 adapter
-curl http://<OCR服务器地址>:8000/health
-```
-
-Marker 的就绪检查使用 `/openapi.json`。MinerU 和 Marker 都由客户独立维护，Adapter
-不会下载模型，也不需要 GPU。
-
-## 官方 OCR 部署资料
-
-- MinerU Docker：https://opendatalab.github.io/MinerU/quick_start/docker_deployment/
-- MinerU 使用说明：https://opendatalab.github.io/MinerU/usage/quick_usage/
-- Marker 2.x：https://github.com/datalab-to/marker/blob/master/README.md
-- Marker 1.10：https://github.com/datalab-to/marker/blob/v1.10.2/README.md
+- MinerU：[Docker 部署教程](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/)
+- MinerU：[快速使用和 API 说明](https://opendatalab.github.io/MinerU/usage/quick_usage/)
+- Marker 2.x：[官方 README](https://github.com/datalab-to/marker/blob/master/README.md)
+- Marker 1.10：[v1.10.2 官方 README](https://github.com/datalab-to/marker/blob/v1.10.2/README.md)
+- Marker 2.0.0：[PyPI 页面](https://pypi.org/project/marker-pdf/2.0.0/)
 
 ## 停止
 
@@ -203,4 +101,4 @@ Marker 的就绪检查使用 `/openapi.json`。MinerU 和 Marker 都由客户独
 docker compose down
 ```
 
-这只停止 Adapter，不会影响客户自己的 OCR 服务。
+这只会停 Adapter，不会动你自己部署的 OCR 服务。
