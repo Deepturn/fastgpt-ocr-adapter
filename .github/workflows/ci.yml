@@ -50,10 +50,11 @@ jobs:
             --tmpfs /tmp:size=256m,mode=1777 --cap-drop ALL \
             -e FASTGPT_OCR_AUTH_TOKEN=REPLACE_WITH_RANDOM_TOKEN \
             -p 127.0.0.1:8001:8001 fastgpt-ocr-adapter:ci
-          trap 'docker stop adapter-smoke' EXIT
-          curl --retry 10 --retry-connrefused --retry-delay 1 \
+          trap 'docker logs adapter-smoke; docker stop adapter-smoke' EXIT
+          curl --retry 15 --retry-all-errors --retry-delay 1 --max-time 2 \
             -fsS http://127.0.0.1:8001/health/live
-          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8001/health/ready)" = 503
+          test "$(curl --max-time 3 -sS -o /dev/null -w '%{http_code}' \
+            http://127.0.0.1:8001/health/ready)" = 503
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: fastgpt-ocr-adapter:ci
