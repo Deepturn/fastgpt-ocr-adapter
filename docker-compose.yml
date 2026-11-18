@@ -2,16 +2,33 @@ name: fastgpt-ocr-adapter
 
 services:
   adapter:
-    image: ${FASTGPT_OCR_ADAPTER_IMAGE:-ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.0}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.1
     restart: unless-stopped
-    env_file:
-      - path: .env
-        required: false
+    environment:
+      FASTGPT_OCR_AUTH_TOKEN: "REPLACE_WITH_RANDOM_TOKEN"
+      FASTGPT_OCR_REQUIRE_AUTH: "true"
+
+      # Choose one provider, API profile and upstream version (see README).
+      FASTGPT_OCR_PROVIDER: mineru
+      FASTGPT_OCR_API_PROFILE: mineru-api-v3
+      FASTGPT_OCR_PROVIDER_VERSION: "3.4.4"
+
+      # Use the OCR service base URL, without /file_parse or /marker/upload.
+      MINERU_BASE_URL: "http://ocr.example.invalid:8000"
+      MARKER_BASE_URL: "http://ocr.example.invalid:8000"
+      MARKER_FORCE_OCR: "false"
+      MARKER_MODE: balanced
+      MARKER_AUTH_TOKEN: ""
+
+      FASTGPT_OCR_TIMEOUT_SECONDS: "540"
+      FASTGPT_OCR_MAX_FILE_BYTES: "52428800"
+      FASTGPT_OCR_MAX_PAGES: "500"
+      FASTGPT_OCR_MAX_CONCURRENT_REQUESTS: "1"
+      FASTGPT_OCR_MAX_QUEUED_REQUESTS: "1"
+      FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS: "60"
     ports:
-      - "${FASTGPT_OCR_BIND:-127.0.0.1}:${FASTGPT_OCR_PORT:-8001}:8001"
+      # Replace 127.0.0.1 with the host's private IP if FastGPT is on another host.
+      - "127.0.0.1:8001:8001"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     read_only: true
@@ -21,17 +38,5 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
-    cpus: ${FASTGPT_OCR_CPU_LIMIT:-1}
-    mem_limit: ${FASTGPT_OCR_MEMORY_LIMIT:-512m}
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - >-
-          import urllib.request;
-          urllib.request.urlopen('http://127.0.0.1:8001/health/ready', timeout=3)
-      interval: 15s
-      timeout: 5s
-      start_period: 10s
-      retries: 4
+    cpus: 1
+    mem_limit: 512m

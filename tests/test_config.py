@@ -15,6 +15,13 @@ def test_defaults_select_mineru() -> None:
     assert settings.max_queued_requests == 1
 
 
+def test_compose_placeholder_does_not_enable_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FASTGPT_OCR_AUTH_TOKEN", "REPLACE_WITH_RANDOM_TOKEN")
+    settings = Settings.from_env()
+    assert settings.require_auth is True
+    assert settings.auth_token == ""
+
+
 def test_marker_environment_is_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FASTGPT_OCR_PROVIDER", "MARKER")
     monkeypatch.setenv("FASTGPT_OCR_API_PROFILE", "MARKER-SERVER-V2")

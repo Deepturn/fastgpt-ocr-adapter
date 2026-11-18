@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+_AUTH_TOKEN_PLACEHOLDER = "REPLACE_WITH_RANDOM_TOKEN"
+
 
 def _env(name: str, default: str) -> str:
     value = os.getenv(name)
@@ -71,13 +73,14 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         defaults = cls()
+        auth_token = _env("FASTGPT_OCR_AUTH_TOKEN", "")
         settings = cls(
             provider=_env("FASTGPT_OCR_PROVIDER", defaults.provider).lower(),
             api_profile=_env("FASTGPT_OCR_API_PROFILE", defaults.api_profile).lower(),
             provider_version=_env(
                 "FASTGPT_OCR_PROVIDER_VERSION", defaults.provider_version
             ),
-            auth_token=_env("FASTGPT_OCR_AUTH_TOKEN", ""),
+            auth_token="" if auth_token == _AUTH_TOKEN_PLACEHOLDER else auth_token,
             require_auth=_bool_env("FASTGPT_OCR_REQUIRE_AUTH", defaults.require_auth),
             timeout_seconds=_float_env(
                 "FASTGPT_OCR_TIMEOUT_SECONDS", defaults.timeout_seconds

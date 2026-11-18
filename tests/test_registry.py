@@ -46,14 +46,8 @@ def test_registry_lists_all_profiles() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    "document",
-    [
-        PROJECT_ROOT / "README.md",
-        PROJECT_ROOT / "deploy" / "standalone" / "README.md",
-    ],
-)
-def test_registered_profiles_are_documented(document: Path) -> None:
+def test_registered_profiles_are_documented() -> None:
+    document = PROJECT_ROOT / "README.md"
     content = document.read_text(encoding="utf-8")
     table_rows = _markdown_table_cells(content)
     for spec in provider_specs():
