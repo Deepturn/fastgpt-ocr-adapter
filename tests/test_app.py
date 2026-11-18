@@ -7,6 +7,7 @@ import pytest
 from conftest import build_pdf
 from fastapi.testclient import TestClient
 
+from fastgpt_ocr_adapter import __version__
 from fastgpt_ocr_adapter.app import create_app
 from fastgpt_ocr_adapter.config import Settings
 from fastgpt_ocr_adapter.errors import (
@@ -173,7 +174,7 @@ def test_health_reports_provider_profile_and_protocol() -> None:
         ready = client.get("/health/ready")
     assert live.json() == {
         "status": "alive",
-        "adapter_version": "0.1.0",
+        "adapter_version": __version__,
         "provider": "mineru",
         "api_profile": "mineru-api-v3",
     }

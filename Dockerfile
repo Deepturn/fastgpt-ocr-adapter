@@ -1,5 +1,8 @@
 FROM python:3.11.11-slim-bookworm
 
+LABEL org.opencontainers.image.source="https://github.com/Deepturn/fastgpt-ocr-adapter" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src

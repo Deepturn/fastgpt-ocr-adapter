@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Semantic adapter version, for example 0.1.0
-        required: true
-        default: 0.1.0
 
 permissions:
   contents: read
@@ -29,12 +23,11 @@ jobs:
       - id: version
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            version="${{ inputs.version }}"
-          else
-            version="${GITHUB_REF_NAME#v}"
-          fi
+          version="${GITHUB_REF_NAME#v}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fx "version = \"$version\"" pyproject.toml
+          grep -Fx "__version__ = \"$version\"" src/fastgpt_ocr_adapter/__init__.py
+          grep -Fx "    image: ${ADAPTER_IMAGE}:$version" docker-compose.yml
           echo "value=$version" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -47,7 +40,11 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          platforms: linux/amd64
           push: true
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
           tags: |
             ${{ env.ADAPTER_IMAGE }}:${{ steps.version.outputs.value }}
             ${{ env.ADAPTER_IMAGE }}:sha-${{ github.sha }}
