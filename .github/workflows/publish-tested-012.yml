@@ -11,19 +11,22 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
       ACR_REGISTRY: ${{ vars.ALIYUN_ACR_REGISTRY }}
       ACR_NAMESPACE: ${{ vars.ALIYUN_ACR_NAMESPACE }}
       ADAPTER_IMAGE: ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.2
       IMAGE_MANIFEST: sha256:84952b962c4af11a2276f87288a728cba61e6595e47de3d989e63d3d0f42710a
     steps:
-      - name: Verify and load the tested release asset
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      - name: Pull and verify the tested Alibaba ACR image
         run: |
-          asset=fastgpt-ocr-adapter-0.1.2-linux-amd64.tar.gz
-          gh release download v0.1.2 --repo "$GITHUB_REPOSITORY" --pattern "$asset"
-          echo "4f02d954dc9fcda7a536201d06b2ade2e363eb05b2df23b47c5cbfb670c1a116  $asset" | sha256sum --check
-          docker load --input "$asset"
-          test "$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$ADAPTER_IMAGE")" = "$IMAGE_MANIFEST"
+          source="$ACR_REGISTRY/$ACR_NAMESPACE/adapter"
+          docker pull --platform linux/amd64 "$source@$IMAGE_MANIFEST"
+          test "$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$source@$IMAGE_MANIFEST")" = "$IMAGE_MANIFEST"
+          docker tag "$source@$IMAGE_MANIFEST" "$ADAPTER_IMAGE"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -35,16 +38,3 @@ jobs:
           docker image rm "$ADAPTER_IMAGE"
           docker pull --platform linux/amd64 "$ADAPTER_IMAGE"
           test "$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$ADAPTER_IMAGE")" = "$IMAGE_MANIFEST"
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.ACR_REGISTRY }}
-          username: ${{ secrets.ALIYUN_ACR_USERNAME }}
-          password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
-      - name: Push and pull Alibaba ACR image
-        run: |
-          target="$ACR_REGISTRY/$ACR_NAMESPACE/adapter:0.1.2"
-          docker tag "$ADAPTER_IMAGE" "$target"
-          docker push --platform linux/amd64 "$target"
-          docker image rm "$target"
-          docker pull --platform linux/amd64 "$target"
-          test "$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$target")" = "$IMAGE_MANIFEST"
