@@ -273,6 +273,24 @@ def test_multipart_field_name_and_extra_fields_are_rejected() -> None:
     assert extra.json()["error"] == "INVALID_REQUEST"
 
 
+def test_fastgpt_multipart_parser_flags_are_accepted() -> None:
+    client, _ = client_for()
+    with client:
+        response = client.post(
+            "/v2/parse/file",
+            files={"file": ("sample.pdf", build_pdf(), "application/pdf")},
+            data={
+                "keep_header_footer": "false",
+                "keep_appendix": "true",
+                "image_analysis": "false",
+                "chart_analysis": "false",
+            },
+            headers={"Authorization": "Bearer secret"},
+        )
+    assert response.status_code == 200
+    assert response.json()["pages"] == 1
+
+
 @pytest.mark.parametrize(
     ("error", "status", "code"),
     [

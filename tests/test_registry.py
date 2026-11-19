@@ -41,6 +41,7 @@ def test_supported_marker_profiles(profile: str, version: str) -> None:
 def test_registry_lists_all_profiles() -> None:
     assert {(spec.name, spec.api_profile) for spec in provider_specs()} == {
         ("mineru", "mineru-api-v3"),
+        ("mineru", "mineru-tasks-v1"),
         ("marker", "marker-server-v1"),
         ("marker", "marker-server-v2"),
     }
@@ -54,7 +55,7 @@ def test_registered_profiles_are_documented() -> None:
         expected = (
             f"`{spec.name}`",
             f"`{spec.api_profile}`",
-            f"`{spec.supported_versions}`",
+            spec.documented_versions,
         )
         assert any(row[:3] == expected for row in table_rows), (
             f"{document.relative_to(PROJECT_ROOT)} must document "
@@ -67,6 +68,11 @@ def test_registered_profiles_are_documented() -> None:
     [
         Settings(provider="unknown"),
         Settings(provider="marker", api_profile="mineru-api-v3"),
+        Settings(api_profile="mineru-tasks-v1", provider_version="4.0.12"),
+        Settings(api_profile="mineru-tasks-v1", provider_version="4.1.8"),
+        Settings(api_profile="mineru-tasks-v1", provider_version="4.2.4"),
+        Settings(api_profile="mineru-tasks-v1", provider_version="3.4.4"),
+        Settings(api_profile="mineru-api-v3", provider_version="4.2.3"),
         Settings(
             provider="marker",
             api_profile="marker-server-v1",

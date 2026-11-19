@@ -18,6 +18,7 @@ from . import __version__
 from .config import Settings
 from .errors import (
     ApiError,
+    ProviderConfigurationError,
     ProviderProcessingError,
     ProviderProtocolError,
     ProviderTimeout,
@@ -26,6 +27,7 @@ from .errors import (
 from .gate import QueueFullError, QueueTimeoutError, RequestGate
 from .images import ImageRewriteError, rewrite_images
 from .providers import ParserProvider, ProviderResult, create_provider
+from .providers.detect import detect_mineru
 
 logger = logging.getLogger("fastgpt_ocr_adapter")
 FASTGPT_PROTOCOL_VERSION = "fastgpt-pdf-v2"
@@ -125,7 +127,11 @@ def create_app(
     provider: ParserProvider | None = None,
 ) -> FastAPI:
     app_settings = settings or Settings.from_env()
-    selected_provider = provider or create_provider(app_settings)
+    auto = app_settings.api_profile == "auto"
+    if auto and app_settings.provider != "mineru":
+        raise ProviderConfigurationError("Automatic profile detection is only supported for MinerU")
+    selected_provider = provider if auto else provider or create_provider(app_settings)
+    detection_error = "MinerU profile has not been resolved"
     request_gate = RequestGate(
         max_concurrent_requests=app_settings.max_concurrent_requests,
         max_queued_requests=app_settings.max_queued_requests,
@@ -134,9 +140,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        del app
-        yield
-        await selected_provider.close()
+        nonlocal selected_provider, detection_error
+        if auto and selected_provider is None:
+            try:
+                selected_provider = await detect_mineru(app_settings)
+                app.state.provider = selected_provider
+            except ProviderConfigurationError as exc:
+                detection_error = str(exc)
+        try:
+            yield
+        finally:
+            if selected_provider is not None:
+                await selected_provider.close()
+                if auto and provider is None:
+                    selected_provider = None
+                    app.state.provider = None
 
     app = FastAPI(
         title="FastGPT OCR Adapter",
@@ -238,19 +256,20 @@ def create_app(
         return {
             "status": "alive",
             "adapter_version": __version__,
-            "provider": selected_provider.name,
-            "api_profile": selected_provider.api_profile,
+            "provider": selected_provider.name if selected_provider else app_settings.provider,
+            "api_profile": selected_provider.api_profile if selected_provider else "auto",
         }
 
     @app.get("/health/ready", response_model=None)
     @app.get("/health", response_model=None)
     async def health_ready(request: Request) -> dict[str, object] | JSONResponse:
+        driver = selected_provider
         auth_configured = not app_settings.require_auth or bool(app_settings.auth_token)
         base = {
             "adapter_version": __version__,
-            "provider": selected_provider.name,
-            "api_profile": selected_provider.api_profile,
-            "version": app_settings.provider_version,
+            "provider": driver.name if driver else app_settings.provider,
+            "api_profile": driver.api_profile if driver else "auto",
+            "version": driver.version if driver and auto else app_settings.provider_version,
             "protocol": FASTGPT_PROTOCOL_VERSION,
             "auth_configured": auth_configured,
         }
@@ -259,8 +278,13 @@ def create_app(
                 status_code=503,
                 content={"status": "not_ready", **base},
             )
+        if driver is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", **base, "message": detection_error},
+            )
         try:
-            provider_health = await selected_provider.health()
+            provider_health = await driver.health()
             request.state.upstream_status = provider_health.upstream_status
         except (
             ProviderUnavailable,
@@ -275,7 +299,7 @@ def create_app(
             )
         if (
             provider_health.status != "healthy"
-            or provider_health.version != app_settings.provider_version
+            or provider_health.version != base["version"]
         ):
             return JSONResponse(
                 status_code=503,
@@ -293,12 +317,25 @@ def create_app(
         file: UploadFile = File(...),  # noqa: B008
     ) -> dict[str, object]:
         _auth_error(app_settings, request)
+        driver = selected_provider
+        if driver is None:
+            raise ApiError(503, "CORE_UNAVAILABLE", "MinerU profile has not been resolved")
         form = await request.form()
-        if set(form.keys()) != {"file"}:
+        # Newer FastGPT releases include these optional parser-specific flags.
+        # None of our provider profiles consumes them; never forward them upstream.
+        optional_fields = {
+            "keep_header_footer", "keep_appendix", "image_analysis", "chart_analysis"
+        }
+        invalid_flags = any(
+            key != "file" and (key not in optional_fields or value not in ("true", "false"))
+            for key, value in form.multi_items()
+        )
+        duplicate_flags = any(len(form.getlist(key)) > 1 for key in optional_fields)
+        if len(form.getlist("file")) != 1 or invalid_flags or duplicate_flags:
             raise ApiError(
                 422,
                 "INVALID_REQUEST",
-                "The multipart request must contain only one field named file",
+                "Expected one file and optional FastGPT parser flags as boolean strings",
             )
         path: Path | None = None
         try:
@@ -308,7 +345,7 @@ def create_app(
             request.state.pages = pages
             try:
                 async with app.state.request_gate:
-                    result: ProviderResult = await selected_provider.parse(path)
+                    result: ProviderResult = await driver.parse(path)
                 request.state.upstream_status = result.upstream_status
             except QueueFullError as exc:
                 raise ApiError(

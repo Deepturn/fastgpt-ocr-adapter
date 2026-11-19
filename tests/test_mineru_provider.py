@@ -14,14 +14,15 @@ from fastgpt_ocr_adapter.errors import (
 from fastgpt_ocr_adapter.providers.mineru import MineruV3Provider
 
 
-def provider_with_handler(handler) -> MineruV3Provider:
-    provider = MineruV3Provider(Settings())
+def provider_with_handler(handler, version: str = "3.4.4") -> MineruV3Provider:
+    provider = MineruV3Provider(Settings(provider_version=version))
     provider.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     return provider
 
 
 @pytest.mark.asyncio
-async def test_mineru_request_uses_official_fixed_fields(tmp_path: Path) -> None:
+@pytest.mark.parametrize("version", ["3.4.4", "3.4.5"])
+async def test_mineru_request_uses_official_fixed_fields(tmp_path: Path, version: str) -> None:
     captured: dict[str, str] = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -30,12 +31,12 @@ async def test_mineru_request_uses_official_fixed_fields(tmp_path: Path) -> None
         return httpx.Response(
             200,
             json={
-                "version": "3.4.4",
+                "version": version,
                 "results": {"file": {"md_content": "# parsed", "images": {}}},
             },
         )
 
-    provider = provider_with_handler(handler)
+    provider = provider_with_handler(handler, version)
     path = tmp_path / "test.pdf"
     path.write_bytes(b"%PDF-test")
     try:
@@ -60,20 +61,21 @@ async def test_mineru_request_uses_official_fixed_fields(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
-async def test_mineru_health_validates_version_and_protocol() -> None:
+@pytest.mark.parametrize("version", ["3.4.4", "3.4.5"])
+async def test_mineru_health_validates_version_and_protocol(version: str) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/health"
         return httpx.Response(
             200,
-            json={"status": "healthy", "version": "3.4.4", "protocol_version": 2},
+            json={"status": "healthy", "version": version, "protocol_version": 2},
         )
 
-    provider = provider_with_handler(handler)
+    provider = provider_with_handler(handler, version)
     try:
         health = await provider.health()
     finally:
         await provider.close()
-    assert health.version == "3.4.4"
+    assert health.version == version
     assert health.protocol_version == "2"
 
 

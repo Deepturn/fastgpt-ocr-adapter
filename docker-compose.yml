@@ -2,19 +2,22 @@ name: fastgpt-ocr-adapter
 
 services:
   adapter:
-    image: ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.1
+    image: ghcr.io/deepturn/fastgpt-ocr-adapter:0.1.2
     restart: unless-stopped
     environment:
       FASTGPT_OCR_AUTH_TOKEN: "REPLACE_WITH_RANDOM_TOKEN"
       FASTGPT_OCR_REQUIRE_AUTH: "true"
 
       # Choose one provider, API profile and upstream version (see README).
+      # Set both API_PROFILE and PROVIDER_VERSION to "auto" to detect a
+      # supported MinerU version at startup.
       FASTGPT_OCR_PROVIDER: mineru
-      FASTGPT_OCR_API_PROFILE: mineru-api-v3
-      FASTGPT_OCR_PROVIDER_VERSION: "3.4.4"
+      FASTGPT_OCR_API_PROFILE: mineru-tasks-v1
+      FASTGPT_OCR_PROVIDER_VERSION: "4.2.3"
 
-      # Use the OCR service base URL, without /file_parse or /marker/upload.
+      # Use the OCR service base URL, without an API endpoint suffix.
       MINERU_BASE_URL: "http://ocr.example.invalid:8000"
+      MINERU_AUTH_TOKEN: ""
       MARKER_BASE_URL: "http://ocr.example.invalid:8000"
       MARKER_FORCE_OCR: "false"
       MARKER_MODE: balanced

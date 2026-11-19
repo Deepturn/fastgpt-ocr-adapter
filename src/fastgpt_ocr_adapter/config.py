@@ -65,6 +65,7 @@ class Settings:
     max_queued_requests: int = 1
     queue_timeout_seconds: float = 60.0
     mineru_base_url: str = "http://host.docker.internal:8000"
+    mineru_auth_token: str = ""
     marker_base_url: str = "http://host.docker.internal:8000"
     marker_force_ocr: bool = False
     marker_mode: str = "balanced"
@@ -74,11 +75,13 @@ class Settings:
     def from_env(cls) -> "Settings":
         defaults = cls()
         auth_token = _env("FASTGPT_OCR_AUTH_TOKEN", "")
+        api_profile = _env("FASTGPT_OCR_API_PROFILE", defaults.api_profile).lower()
         settings = cls(
             provider=_env("FASTGPT_OCR_PROVIDER", defaults.provider).lower(),
-            api_profile=_env("FASTGPT_OCR_API_PROFILE", defaults.api_profile).lower(),
+            api_profile=api_profile,
             provider_version=_env(
-                "FASTGPT_OCR_PROVIDER_VERSION", defaults.provider_version
+                "FASTGPT_OCR_PROVIDER_VERSION",
+                "auto" if api_profile == "auto" else defaults.provider_version,
             ),
             auth_token="" if auth_token == _AUTH_TOKEN_PLACEHOLDER else auth_token,
             require_auth=_bool_env("FASTGPT_OCR_REQUIRE_AUTH", defaults.require_auth),
@@ -103,6 +106,7 @@ class Settings:
                 "FASTGPT_OCR_QUEUE_TIMEOUT_SECONDS", defaults.queue_timeout_seconds
             ),
             mineru_base_url=_base_url("MINERU_BASE_URL", defaults.mineru_base_url),
+            mineru_auth_token=_env("MINERU_AUTH_TOKEN", ""),
             marker_base_url=_base_url("MARKER_BASE_URL", defaults.marker_base_url),
             marker_force_ocr=_bool_env(
                 "MARKER_FORCE_OCR", defaults.marker_force_ocr

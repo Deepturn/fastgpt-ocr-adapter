@@ -6,7 +6,7 @@ separate upstream projects and are not vendored here.
 ## MinerU
 
 - Project: <https://github.com/opendatalab/MinerU>
-- Implemented API profile: MinerU 3.4.4, `mineru-api`
+- Implemented API profiles: legacy `mineru-api` and Tasks API; see the README for tested versions
 - License: review the license shipped with the selected MinerU release
 - Models: Pipeline model weights have separate terms
 

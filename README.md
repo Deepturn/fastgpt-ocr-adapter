@@ -6,21 +6,24 @@ FastGPT 把 PDF 发到 `POST /v2/parse/file`，适配器按配置调用 OCR API�
 
 ## 1. 选一个 OCR 后端
 
-| Provider | API Profile | OCR 版本 | 官方部署说明 |
-| --- | --- | --- | --- |
-| `mineru` | `mineru-api-v3` | `==3.4.4` | [官方 Docker 教程（3.4.4）](https://github.com/opendatalab/MinerU/blob/mineru-3.4.4-released/docs/zh/quick_start/docker_deployment.md) · [API 使用说明](https://github.com/opendatalab/MinerU/blob/mineru-3.4.4-released/docs/zh/usage/quick_usage.md) |
-| `marker` | `marker-server-v1` | `>=1.8,<2.0` | [Marker 1.10.2 API server](https://github.com/datalab-to/marker/blob/v1.10.2/README.md#api-server) |
-| `marker` | `marker-server-v2` | `==2.0.0` | [Marker 2.0.0 API server](https://pypi.org/project/marker-pdf/2.0.0/#api-server) |
+| Provider | API Profile | OCR 版本 | 验证范围 | 官方部署说明 |
+| --- | --- | --- | --- | --- |
+| `mineru` | `mineru-api-v3` | `3.4.4`, `3.4.5` | 逐版 CPU Pipeline 驱动实测 | [官方 Docker 教程（3.4.4）](https://github.com/opendatalab/MinerU/blob/mineru-3.4.4-released/docs/zh/quick_start/docker_deployment.md) · [API 使用说明](https://github.com/opendatalab/MinerU/blob/mineru-3.4.4-released/docs/zh/usage/quick_usage.md) |
+| `mineru` | `mineru-tasks-v1` | `4.1.0`, `4.1.1`, `4.1.2`, `4.1.3`, `4.1.4`, `4.1.5`, `4.1.6`, `4.1.7`, `4.2.0`, `4.2.1`, `4.2.2`, `4.2.3` | 逐版 CPU Basic 驱动实测；`4.2.3` 另通过 FastGPT `4.17.3` 上传入库验收 | [官方 Docker 教程（4.2.3）](https://github.com/opendatalab/MinerU/blob/mineru-4.2.3-released/docs/zh/quick_start/docker_deployment.md) · [Tasks API](https://github.com/opendatalab/MinerU/blob/mineru-4.2.3-released/docs/zh/usage/tasks.md) |
+| `marker` | `marker-server-v1` | `>=1.8,<2.0` | 协议验证 | [Marker 1.10.2 API server](https://github.com/datalab-to/marker/blob/v1.10.2/README.md#api-server) |
+| `marker` | `marker-server-v2` | `==2.0.0` | 协议验证 | [Marker 2.0.0 API server](https://pypi.org/project/marker-pdf/2.0.0/#api-server) |
 
-MinerU 用官方 `mineru-api` 的 `/file_parse`，适配器固定请求 Pipeline。Marker 用官方 `marker_server` 的 `/marker/upload`，不支持 FastGPT 改造版 Marker。一个适配器实例连接一个后端。换 OCR 版本时，先查表确认 API Profile；MinerU 4.x 的 [Docker 教程](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/)不能直接用于这里的 3.4.4 配置。
+一个适配器实例连接一个后端。MinerU 3.4.x 表中版本使用 `mineru-api` 的 `/file_parse`（Pipeline）；表中的 4.x 版本用 `mineru-kit api-server` 的 `/v1/tasks`，不需要另启 `file-parse-server`。Tasks 返回的上传和下载地址必须与 `MINERU_BASE_URL` 同源。Marker 用官方 `marker_server`，不支持 FastGPT 改造版 Marker。
+
+“协议验证”指核对接口并运行契约测试；“驱动实测”指用官方服务实际识别同一份中文扫描 PDF，检查正文和图片。`4.2.3` 的接口实测返回 1 页、中文 Markdown 和 1 张 JPEG；首次请求含模型下载耗时 40.34 秒，MinerU 进程峰值 RSS 约 1.06 GiB。单页样例不能用来估算长文档或多并发的资源。
+
+另用 `0.1.2` 适配器镜像和独立部署的 MinerU `4.2.3`，在 FastGPT `4.17.3` 开启增强 PDF 解析后上传同一份文件，读回了知识库里的中文正文，并从 FastGPT 下载到入库后的 JPEG。测试使用本地向量模型替身，没有评估检索效果。
+
+`4.0.0`–`4.0.11` 使用 Jobs API，`4.0.12` 另有过渡版 Tasks API。这 13 个版本都用原生 Jobs API 跑通了同一份扫描件，但不兼容本适配器的 `mineru-tasks-v1`，因此不在支持表内。
 
 ## 2. 启动适配器
 
-在 Linux x86_64 上，有 Docker 和 Compose 就可以用发布镜像。复制这份 [docker-compose.yml](docker-compose.yml)，不需要克隆仓库或准备 `.env`：
-
-```bash
-curl -fLO https://raw.githubusercontent.com/Deepturn/fastgpt-ocr-adapter/v0.1.1/docker-compose.yml
-```
+在 Linux x86_64 上，用 Docker 和 Compose 启动。下载这份 [docker-compose.yml](docker-compose.yml)，不需要克隆仓库或准备 `.env`。
 
 先改 YAML，再启动：
 
@@ -28,7 +31,8 @@ curl -fLO https://raw.githubusercontent.com/Deepturn/fastgpt-ocr-adapter/v0.1.1/
 | --- | --- |
 | `FASTGPT_OCR_AUTH_TOKEN` | 换成自己的访问密钥，可用 `openssl rand -hex 32` 生成。 |
 | `FASTGPT_OCR_PROVIDER`、`FASTGPT_OCR_API_PROFILE`、`FASTGPT_OCR_PROVIDER_VERSION` | 对照上表填写，版本号填实际安装的版本。 |
-| `MINERU_BASE_URL` / `MARKER_BASE_URL` | 填选中后端的地址，例如 `http://192.0.2.10:8000`。只填服务地址，不加 `/file_parse` 或 `/marker/upload`。 |
+| `MINERU_BASE_URL` / `MARKER_BASE_URL` | 填选中后端的地址，例如 `http://192.0.2.10:8000`。不用加 `/file_parse`、`/v1/tasks` 或 `/marker/upload`。 |
+| `MINERU_AUTH_TOKEN` | 用于 MinerU Tasks API。若 MinerU 启用了 API Key，就填它的 Key；它不是 FastGPT 调用适配器的密钥。 |
 | `MARKER_FORCE_OCR`、`MARKER_MODE`、`MARKER_AUTH_TOKEN` | 分别用于强制 OCR、v2 的 `balanced` / `fast` 模式、Marker 上游的 Bearer Token。没有特殊要求可保留默认值。 |
 
 端口默认只绑定宿主机的 `127.0.0.1:8001`。如果 FastGPT 跑在 Docker 容器内或另一台机器上，可以把端口绑定改成宿主机私网 IP，并在网络侧限制只有 FastGPT 能访问。也可以把 FastGPT 和适配器接到同一个 Docker 网络，用 `http://adapter:8001` 访问。容器里的 `127.0.0.1` 不是宿主机；OCR 跑在宿主机时，可以用 `host.docker.internal` 前提是 OCR 已监听容器能访问的地址。
@@ -42,6 +46,10 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 如果改了端口绑定，最后一行也要用改后的地址。`/health/live` 只检查适配器进程；`/health/ready` 返回 `ready` 才说明鉴权已配置、上游 API 能连通且通过协议检查。Marker 的版本来自配置，接口结构通过 OpenAPI 检查。密钥写在 YAML 里，别提交部署后的文件。
 
+**自动识别（可选）：** 可以把 `FASTGPT_OCR_API_PROFILE` 和 `FASTGPT_OCR_PROVIDER_VERSION` 都设成 `auto`，让适配器启动时从 MinerU 的健康接口识别；识别出的版本仍须在上表里。生产环境也可以保留明确的 Profile 和版本号，避免上游升级后配置含义发生变化。
+
+`auto` 只用于 MinerU。启动时如果上游没就绪、版本不匹配或探测到两个可用协议，适配器会拒绝解析。先看 `/health/ready`，修正配置或启动上游后，运行 `docker compose up -d --force-recreate --pull never` 重新识别。运行中不会换驱动，也不会拿用户的文件试接口。
+
 ## 3. 接入 FastGPT
 
 先拿一份 PDF 测试。把地址和 Token 换成你的配置：
@@ -53,6 +61,8 @@ curl -fsS http://127.0.0.1:8001/v2/parse/file \
 ```
 
 成功示例：`{"success":true,"message":"","pages":12,"markdown":"..."}`。
+
+FastGPT 若随文件发送页眉页脚、附录、图片分析或图表分析开关，适配器会接收这些开关，但不会把它们转发给 OCR，也不会据此改变解析结果。
 
 在 FastGPT 中选择自定义 PDF 解析，URL 填 FastGPT 容器能访问的完整地址，例如 `http://adapter:8001/v2/parse/file`，Key 填 `FASTGPT_OCR_AUTH_TOKEN`。使用环境变量配置的版本（例如 [4.15.3](https://github.com/labring/FastGPT/blob/v4.15.3/packages/service/common/file/read/utils.ts)），填写 `CUSTOM_PDF_PARSE_URL` 和 `CUSTOM_PDF_PARSE_KEY` 后重启 FastGPT。导入 PDF 时打开增强 PDF 解析；`customPdfParse` 是导入选项，不是环境变量。
 
