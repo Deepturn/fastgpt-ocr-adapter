@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastgpt-ocr-adapter"
-version = "0.1.2"
+version = "0.1.3"
 description = "FastGPT-compatible HTTP adapter for local OCR and document parsing services"
 readme = "README.md"
 license = { text = "Apache-2.0" }

@@ -1,12 +1,12 @@
-name: Publish images to Alibaba ACR
+name: Mirror a released adapter image to Alibaba ACR
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Adapter image tag, for example 0.1.2
+        description: Existing GHCR release version (without the v prefix)
         required: true
-        default: 0.1.2
+        type: string
 
 permissions:
   contents: read
@@ -17,22 +17,21 @@ env:
 
 jobs:
   publish:
-    if: inputs.version != '0.1.2'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check ACR settings
+      - name: Pull the released image and record its image ID
+        id: source
         env:
-          ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
-          ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+          VERSION: ${{ inputs.version }}
         run: |
-          test -n "$ACR_REGISTRY" || { echo "ALIYUN_ACR_REGISTRY is missing"; exit 1; }
-          test -n "$ACR_NAMESPACE" || { echo "ALIYUN_ACR_NAMESPACE is missing"; exit 1; }
-          test -n "$ACR_USERNAME" || { echo "ALIYUN_ACR_USERNAME is missing"; exit 1; }
-          test -n "$ACR_PASSWORD" || { echo "ALIYUN_ACR_PASSWORD is missing"; exit 1; }
-
-      - uses: docker/setup-buildx-action@v3
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          : "${ACR_REGISTRY:?Missing ALIYUN_ACR_REGISTRY}"
+          : "${ACR_NAMESPACE:?Missing ALIYUN_ACR_NAMESPACE}"
+          source="ghcr.io/deepturn/fastgpt-ocr-adapter:$VERSION"
+          docker pull --platform linux/amd64 "$source"
+          digest=$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$source")
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Alibaba ACR
         uses: docker/login-action@v3
@@ -41,13 +40,16 @@ jobs:
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
           password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
 
-      - name: Build and push adapter
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/adapter:${{ inputs.version }}
-            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/adapter:sha-${{ github.sha }}
+      - name: Mirror without rebuilding and verify by pulling
+        env:
+          VERSION: ${{ inputs.version }}
+          EXPECTED_DIGEST: ${{ steps.source.outputs.digest }}
+        run: |
+          source="ghcr.io/deepturn/fastgpt-ocr-adapter:$VERSION"
+          target="$ACR_REGISTRY/$ACR_NAMESPACE/adapter:$VERSION"
+          docker tag "$source" "$target"
+          docker push --platform linux/amd64 "$target"
+          docker image rm "$target"
+          docker pull --platform linux/amd64 "$target"
+          test "$(docker image inspect --platform linux/amd64 --format '{{.Id}}' "$target")" \
+            = "$EXPECTED_DIGEST"

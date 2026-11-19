@@ -273,6 +273,41 @@ def test_multipart_field_name_and_extra_fields_are_rejected() -> None:
     assert extra.json()["error"] == "INVALID_REQUEST"
 
 
+@pytest.mark.parametrize(("headers", "status"), [({}, 401), ({
+    "Authorization": "Bearer secret"
+}, 422)])
+def test_authentication_precedes_multipart_parsing(headers: dict[str, str], status: int) -> None:
+    client, provider = client_for()
+    with client:
+        response = client.post(
+            "/v2/parse/file",
+            content=b"",
+            headers={"Content-Type": "multipart/form-data", **headers},
+        )
+    assert response.status_code == status
+    assert provider.received_path is None
+
+
+@pytest.mark.parametrize("flags", [
+    {"force_ocr": "true"},
+    {"image_analysis": "yes"},
+    {"image_analysis": ["true", "false"]},
+    {"file": "not-an-upload"},
+])
+def test_invalid_multipart_fields_do_not_reach_the_provider(flags: dict[str, object]) -> None:
+    client, provider = client_for()
+    with client:
+        response = client.post(
+            "/v2/parse/file",
+            files={"file": ("sample.pdf", build_pdf(), "application/pdf")},
+            data=flags,
+            headers={"Authorization": "Bearer secret"},
+        )
+    assert response.status_code == 422
+    assert response.json()["error"] == "INVALID_REQUEST"
+    assert provider.received_path is None
+
+
 def test_fastgpt_multipart_parser_flags_are_accepted() -> None:
     client, _ = client_for()
     with client:

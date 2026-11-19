@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -38,8 +39,8 @@ def _float_env(name: str, default: float) -> float:
         parsed = float(value)
     except ValueError as exc:
         raise ValueError(f"{name} must be a number") from exc
-    if parsed <= 0:
-        raise ValueError(f"{name} must be greater than zero")
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise ValueError(f"{name} must be a finite number greater than zero")
     return parsed
 
 

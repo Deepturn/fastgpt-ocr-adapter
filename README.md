@@ -17,7 +17,7 @@ FastGPT 把 PDF 发到 `POST /v2/parse/file`，适配器按配置调用 OCR API�
 
 “协议验证”指核对接口并运行契约测试；“驱动实测”指用官方服务实际识别同一份中文扫描 PDF，检查正文和图片。`4.2.3` 的接口实测返回 1 页、中文 Markdown 和 1 张 JPEG；首次请求含模型下载耗时 40.34 秒，MinerU 进程峰值 RSS 约 1.06 GiB。单页样例不能用来估算长文档或多并发的资源。
 
-另用 `0.1.2` 适配器镜像和独立部署的 MinerU `4.2.3`，在 FastGPT `4.17.3` 开启增强 PDF 解析后上传同一份文件，读回了知识库里的中文正文，并从 FastGPT 下载到入库后的 JPEG。测试使用本地向量模型替身，没有评估检索效果。
+用 `0.1.3` 适配器（`auto` 模式）和单独部署的 MinerU `4.2.3`，在 FastGPT `4.17.3` 开启增强 PDF 解析后上传同一份文件，读回了知识库里的中文正文，也从 FastGPT 下载到了入库后的 JPEG。测试使用本地向量模型替身，没有评估检索效果。
 
 `4.0.0`–`4.0.11` 使用 Jobs API，`4.0.12` 另有过渡版 Tasks API。这 13 个版本都用原生 Jobs API 跑通了同一份扫描件，但不兼容本适配器的 `mineru-tasks-v1`，因此不在支持表内。
 
@@ -48,7 +48,7 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 **自动识别（可选）：** 可以把 `FASTGPT_OCR_API_PROFILE` 和 `FASTGPT_OCR_PROVIDER_VERSION` 都设成 `auto`，让适配器启动时从 MinerU 的健康接口识别；识别出的版本仍须在上表里。生产环境也可以保留明确的 Profile 和版本号，避免上游升级后配置含义发生变化。
 
-`auto` 只用于 MinerU。启动时如果上游没就绪、版本不匹配或探测到两个可用协议，适配器会拒绝解析。先看 `/health/ready`，修正配置或启动上游后，运行 `docker compose up -d --force-recreate --pull never` 重新识别。运行中不会换驱动，也不会拿用户的文件试接口。
+`auto` 只用于 MinerU。上游还没启动或暂时无法识别时，适配器会在后台重试，间隔从 1 秒逐步增加到最多 30 秒。这期间 `/health/ready` 和解析接口返回 `503`，不会用上传的 PDF 试探上游。识别成功后自动恢复；如果之后 MinerU 临时掉线，适配器仍使用已选的驱动。更换上游版本或协议后，重新创建适配器容器才会重新识别。
 
 ## 3. 接入 FastGPT
 
@@ -72,8 +72,8 @@ FastGPT 若随文件发送页眉页脚、附录、图片分析或图表分析开
 - 默认排队最多 60 秒、上游解析最多 540 秒（`FASTGPT_OCR_TIMEOUT_SECONDS`）。如果 FastGPT 的超时是 600 秒，可先把排队时间调到 15–30 秒，给上传和返回结果留出时间。PDF 默认最多 50 MiB、500 页，可改 `FASTGPT_OCR_MAX_FILE_BYTES` 和 `FASTGPT_OCR_MAX_PAGES`。
 - `401`：核对 FastGPT 的 Key。 `503 PARSER_BUSY` / `QUEUE_TIMEOUT`：队列满了或等太久。 `503 CORE_UNAVAILABLE`：先检查 OCR 地址和网络。 `504 CORE_TIMEOUT`：上游超时。容器日志用 `docker compose logs --tail=100 adapter` 查看。
 
-## 加一个 OCR 后端
+## 参与开发
 
-在 [providers/](src/fastgpt_ocr_adapter/providers/) 下实现驱动，在 [registry.py](src/fastgpt_ocr_adapter/providers/registry.py) 注册 Provider、API Profile 和版本范围。上游参数和响应校验写在驱动里，FastGPT 接口保持不变。提交时补上请求和健康检查测试，并更新上面的支持表和官方部署链接。
+新增 OCR 后端、运行测试或维护镜像，请看 [贡献指南](CONTRIBUTING.md)。
 
 适配器使用 Apache-2.0。OCR 服务和模型权重遵循各自的[上游许可证](THIRD_PARTY_NOTICES.md)。

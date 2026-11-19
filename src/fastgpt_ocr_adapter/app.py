@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import tempfile
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable
 
-from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
 from pypdf import PdfReader
+from python_multipart.exceptions import MultipartParseError
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import FormData, UploadFile
+from starlette.exceptions import HTTPException
 
 from . import __version__
 from .config import Settings
@@ -31,6 +35,9 @@ from .providers.detect import detect_mineru
 
 logger = logging.getLogger("fastgpt_ocr_adapter")
 FASTGPT_PROTOCOL_VERSION = "fastgpt-pdf-v2"
+_FASTGPT_FLAGS = frozenset({
+    "keep_header_footer", "keep_appendix", "image_analysis", "chart_analysis",
+})
 
 
 def _request_id(request: Request) -> str:
@@ -66,7 +73,6 @@ async def _save_upload(upload: UploadFile, settings: Settings) -> tuple[Path, in
         "application/pdf",
         "application/octet-stream",
     }:
-        await upload.close()
         raise ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Only PDF files are supported")
 
     handle = tempfile.NamedTemporaryFile(
@@ -87,15 +93,36 @@ async def _save_upload(upload: UploadFile, settings: Settings) -> tuple[Path, in
                         "PDF exceeds the configured size limit",
                     )
                 handle.write(chunk)
-    except Exception:
+    except BaseException:
         path.unlink(missing_ok=True)
         raise
-    finally:
-        await upload.close()
     if total == 0:
         path.unlink(missing_ok=True)
         raise ApiError(400, "EMPTY_FILE", "The uploaded PDF is empty")
     return path, total
+
+
+def _invalid_upload() -> ApiError:
+    return ApiError(
+        422, "INVALID_REQUEST",
+        "Expected one PDF field named file and optional FastGPT parser flags as boolean strings",
+    )
+
+
+def _get_upload(form: FormData) -> UploadFile:
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise _invalid_upload()
+    seen = {"file"}
+    for key, value in form.multi_items():
+        if key == "file":  # The multipart parser enforces at most one uploaded file.
+            if value is not upload:
+                raise _invalid_upload()
+        elif key in seen or key not in _FASTGPT_FLAGS or value not in ("true", "false"):
+            raise _invalid_upload()
+        else:
+            seen.add(key)
+    return upload
 
 
 def _inspect_pdf(path: Path, settings: Settings) -> int:
@@ -122,6 +149,10 @@ def _inspect_pdf(path: Path, settings: Settings) -> int:
     return pages
 
 
+async def _wait_mineru_retry(delay: float) -> None:
+    await asyncio.sleep(delay)
+
+
 def create_app(
     settings: Settings | None = None,
     provider: ParserProvider | None = None,
@@ -141,20 +172,43 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         nonlocal selected_provider, detection_error
-        if auto and selected_provider is None:
+
+        async def resolve_mineru() -> bool:
+            nonlocal selected_provider, detection_error
             try:
-                selected_provider = await detect_mineru(app_settings)
-                app.state.provider = selected_provider
+                driver = await detect_mineru(app_settings)
             except ProviderConfigurationError as exc:
                 detection_error = str(exc)
+                return False
+            selected_provider = app.state.provider = driver
+            return True
+
+        async def retry_mineru() -> None:
+            delay = 1.0
+            while True:
+                await _wait_mineru_retry(delay)
+                if await resolve_mineru():
+                    return
+                delay = min(delay * 2, 30.0)
+
+        retry_task = None
         try:
+            if auto and selected_provider is None:
+                detection_error = "MinerU profile has not been resolved"
+                if not await resolve_mineru():
+                    retry_task = asyncio.create_task(retry_mineru(), name="mineru-detection")
             yield
         finally:
-            if selected_provider is not None:
-                await selected_provider.close()
-                if auto and provider is None:
-                    selected_provider = None
-                    app.state.provider = None
+            try:
+                if retry_task is not None:
+                    retry_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await retry_task
+            finally:
+                if selected_provider is not None:
+                    await selected_provider.close()
+                    if auto and provider is None:
+                        selected_provider = app.state.provider = None
 
     app = FastAPI(
         title="FastGPT OCR Adapter",
@@ -213,22 +267,6 @@ def create_app(
                 "X-Request-ID": getattr(request.state, "request_id", ""),
                 **exc.headers,
             },
-        )
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_error_handler(
-        request: Request,
-        exc: RequestValidationError,
-    ) -> JSONResponse:
-        del exc
-        return JSONResponse(
-            status_code=422,
-            content={
-                "success": False,
-                "message": "The request must contain one PDF field named file",
-                "error": "INVALID_REQUEST",
-            },
-            headers={"X-Request-ID": getattr(request.state, "request_id", "")},
         )
 
     @app.exception_handler(Exception)
@@ -312,36 +350,23 @@ def create_app(
         }
 
     @app.post("/v2/parse/file")
-    async def parse_file(
-        request: Request,
-        file: UploadFile = File(...),  # noqa: B008
-    ) -> dict[str, object]:
+    async def parse_file(request: Request) -> dict[str, object]:
         _auth_error(app_settings, request)
         driver = selected_provider
         if driver is None:
             raise ApiError(503, "CORE_UNAVAILABLE", "MinerU profile has not been resolved")
-        form = await request.form()
-        # Newer FastGPT releases include these optional parser-specific flags.
-        # None of our provider profiles consumes them; never forward them upstream.
-        optional_fields = {
-            "keep_header_footer", "keep_appendix", "image_analysis", "chart_analysis"
-        }
-        invalid_flags = any(
-            key != "file" and (key not in optional_fields or value not in ("true", "false"))
-            for key, value in form.multi_items()
-        )
-        duplicate_flags = any(len(form.getlist(key)) > 1 for key in optional_fields)
-        if len(form.getlist("file")) != 1 or invalid_flags or duplicate_flags:
-            raise ApiError(
-                422,
-                "INVALID_REQUEST",
-                "Expected one file and optional FastGPT parser flags as boolean strings",
-            )
         path: Path | None = None
         try:
-            path, size = await _save_upload(file, app_settings)
+            # Parse only after auth. The context owns all Starlette spool files.
+            try:
+                async with request.form(
+                    max_files=1, max_fields=len(_FASTGPT_FLAGS), max_part_size=1024,
+                ) as form:
+                    path, size = await _save_upload(_get_upload(form), app_settings)
+            except (HTTPException, MultipartParseError) as exc:
+                raise _invalid_upload() from exc
             request.state.file_size = size
-            pages = _inspect_pdf(path, app_settings)
+            pages = await run_in_threadpool(_inspect_pdf, path, app_settings)
             request.state.pages = pages
             try:
                 async with app.state.request_gate:
@@ -398,7 +423,7 @@ def create_app(
                     "The parser encountered an internal error",
                 ) from exc
             try:
-                markdown = rewrite_images(result.markdown, result.images)
+                markdown = await run_in_threadpool(rewrite_images, result.markdown, result.images)
             except ImageRewriteError as exc:
                 raise ApiError(
                     502,

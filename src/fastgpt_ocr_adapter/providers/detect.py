@@ -19,6 +19,7 @@ from .registry import create_provider
 
 async def detect_mineru(settings: Settings) -> ParserProvider:
     """Resolve one registered MinerU contract without submitting any work."""
+    candidates: list[ParserProvider] = []
 
     async def probe(
         client: httpx.AsyncClient, endpoint: str, profile: str
@@ -55,6 +56,7 @@ async def detect_mineru(settings: Settings) -> ParserProvider:
                 except BaseException:
                     await driver.close()
                     raise
+                candidates.append(driver)
                 return driver
         except (
             TimeoutError,
@@ -66,15 +68,17 @@ async def detect_mineru(settings: Settings) -> ParserProvider:
         ) as exc:
             raise ProviderProtocolError(f"MinerU {endpoint} failed startup validation") from exc
 
-    async with httpx.AsyncClient(follow_redirects=False) as client:
-        results = await asyncio.gather(
-            probe(client, "/health", "mineru-api-v3"),
-            probe(client, "/v1/health", "mineru-tasks-v1"),
-            return_exceptions=True,
-        )
-    candidates = [
-        item for item in results if item is not None and not isinstance(item, BaseException)
-    ]
+    try:
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            results = await asyncio.gather(
+                probe(client, "/health", "mineru-api-v3"),
+                probe(client, "/v1/health", "mineru-tasks-v1"),
+                return_exceptions=True,
+            )
+    except BaseException:
+        for driver in candidates:
+            await driver.close()
+        raise
     if len(candidates) == 1 and not any(isinstance(item, BaseException) for item in results):
         return candidates[0]
     for driver in candidates:
